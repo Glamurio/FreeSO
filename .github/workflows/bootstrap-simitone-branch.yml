@@ -1,0 +1,27 @@
+name: Bootstrap simitone branch
+
+on:
+  push:
+    branches: ['tooling/bootstrap']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  create-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Create refs/heads/simitone at f86bbd34b
+        run: |
+          set -e
+          git fetch --no-tags https://github.com/riperiperi/FreeSO f86bbd34b2112296ed786741f640a0535886d180
+          git cat-file -e f86bbd34b2112296ed786741f640a0535886d180^{commit}
+          if git ls-remote --exit-code origin refs/heads/simitone; then
+            echo "::warning::simitone branch already exists, not touching it"
+          else
+            git push origin f86bbd34b2112296ed786741f640a0535886d180:refs/heads/simitone
+          fi
