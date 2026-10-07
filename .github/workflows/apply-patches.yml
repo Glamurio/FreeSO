@@ -1,0 +1,35 @@
+name: Apply patches
+
+# Development helper for this fork: commits pushed under .patches/ (git format-patch output) are
+# applied with `git am` and the patch files are removed again. This lets changes be delivered as small
+# patches by tools that can only write whole files through the GitHub API.
+on:
+  push:
+    paths: ['.patches/*.patch']
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply and commit
+        run: |
+          set -u
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          patches=$(ls .patches/*.patch | sort)
+          mkdir -p "$RUNNER_TEMP/p" && cp $patches "$RUNNER_TEMP/p/"
+          git rm -q $patches
+          git commit -q -m "Remove applied patch files"
+          for p in $(ls "$RUNNER_TEMP"/p/*.patch | sort); do
+            if ! out=$(git am --committer-date-is-author-date "$p" 2>&1); then
+              echo "::error title=Patch failed ($(basename "$p"))::$(echo "$out" | tr '\n' ' ' | cut -c1-900)"
+              exit 1
+            fi
+          done
+          git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"

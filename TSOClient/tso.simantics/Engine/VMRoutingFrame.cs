@@ -52,6 +52,14 @@ namespace FSO.SimAntics.Engine
         private static int WAIT_TIMEOUT = 10 * 30; //10 seconds
         private static int MAX_RETRIES = 5;
 
+        //side-stepping speed through a pinch, in the same units as Velocity (full walking speed is 8).
+        private const int SHIMMY_VELOCITY = 2;
+        //pets squeeze through walking forwards at half speed (their move frames are already doubled).
+        private const int SHIMMY_VELOCITY_PET = 4;
+        //STR 150/151 (person walk animations): standing-adjust-w and standing-adjust-e
+        private const int ANIM_ADJUST_LEFT = 14;
+        private const int ANIM_ADJUST_RIGHT = 15;
+
         private Stack<VMRoomPortal> Rooms = new Stack<VMRoomPortal>();
         private VMRoomPortal CurrentPortal;
 
@@ -357,6 +365,7 @@ namespace FSO.SimAntics.Engine
             obstacles.Add(new VMObstacle(bx+width, by-16, bx+width+16, by+height+16));
 
             var considerAvatars = !Caller.GetFlag(VMEntityFlags.AllowPersonIntersection);
+            var shimmyCandidates = CanShimmy() ? new List<VMShimmyCandidate>() : null;
 
             foreach (var obj in roomInfo.Entities)
             {
@@ -368,14 +377,34 @@ namespace FSO.SimAntics.Engine
                     ((flags & VMEntityFlags.DisallowPersonIntersection) > 0 || (flags & VMEntityFlags.AllowPersonIntersection) == 0)
                     && (!(Caller.ExecuteEntryPoint(5, VM.Context, true, obj, new short[] { obj.ObjectID, 1, 0, 0 })
                         || obj.ExecuteEntryPoint(5, VM.Context, true, Caller, new short[] { Caller.ObjectID, 1, 0, 0 }))))
-                    obstacles.Add(new VMObstacle(ft.x1-3, ft.y1-3, ft.x2+3, ft.y2+3));
+                {
+                    var inflated = new VMObstacle(ft.x1 - 3, ft.y1 - 3, ft.x2 + 3, ft.y2 + 3);
+                    obstacles.Add(inflated);
+                    if (shimmyCandidates != null && obj is VMGameObject)
+                    {
+                        shimmyCandidates.Add(new VMShimmyCandidate()
+                        {
+                            Footprint = new VMObstacle(ft.x1, ft.y1, ft.x2, ft.y2),
+                            Inflated = inflated,
+                            Owner = obj,
+                            Group = obj.MultitileGroup
+                        });
+                    }
+                }
+            }
+
+            int dir = (int)DirectionUtils.PosMod(Math.Round(Caller.RadianDirection / (Math.PI / 2f)), 4);
+
+            if (shimmyCandidates != null && shimmyCandidates.Count > 1)
+            {
+                //with no pinches in the room this falls through to the unchanged legacy route below.
+                var planner = new VMShimmyPlanner(obstacles, shimmyCandidates);
+                if (planner.Pinches.Count > 0) return AttemptShimmyWalk(planner, startPoint, endPoint, dir);
             }
 
             if (obstacles.SearchForIntersect(new VMObstacle(startPoint, startPoint))) return false;
 
             var router = new VMRectRouter(obstacles);
-
-            int dir = (int)DirectionUtils.PosMod(Math.Round(Caller.RadianDirection / (Math.PI / 2f)), 4);
 
             var rectRoute = router.Route(startPoint, endPoint, dir);// (6-dir)%4);
             var parent = ParentRoute ?? this;
@@ -400,7 +429,90 @@ namespace FSO.SimAntics.Engine
             return (WalkTo != null);
         }
 
-        private void DebugDraw(LinkedList<VMWalkableRect> rects)
+        private bool CanShimmy()
+        {
+            //swimming is left alone.
+            if (!VMShimmyPlanner.Enabled || !VM.TS1) return false;
+            var avatar = Caller as VMAvatar;
+            if (avatar == null || InPool) return false;
+            //CONFIRMED (ExpansionPack5.far, TemplateDog/TemplateCat STR 150): pets have no side-step animation, entries
+            //11-18 are "d2o-stand-still" or empty. Pets squeeze through facing forwards with their walk cycle instead.
+            if (avatar.IsPet) return true;
+            var anims = avatar.WalkAnimations;
+            return !string.IsNullOrEmpty(anims[ANIM_ADJUST_LEFT]) && !string.IsNullOrEmpty(anims[ANIM_ADJUST_RIGHT]);
+        }
+
+        private int ShimmyVelocity(VMAvatar avatar)
+        {
+            return avatar.IsPet ? SHIMMY_VELOCITY_PET : SHIMMY_VELOCITY;
+        }
+
+        /// <summary>
+        /// Builds WalkTo from a route that may contain shimmy legs (see VMShimmyPlanner). Rect legs become line or bezier
+        /// segments exactly as in AttemptWalk; shimmy legs become VMPathShimmySegments.
+        /// </summary>
+        private bool AttemptShimmyWalk(VMShimmyPlanner planner, Point startPoint, Point endPoint, int dir)
+        {
+            var legs = planner.Plan(startPoint, endPoint, dir);
+            if (legs == null) return false;
+
+            var parent = ParentRoute ?? this;
+            float? inDir = (parent.State == VMRoutingFrameState.ROOM_PORTAL || parent.PortalTurns > 0) ? Caller.RadianDirection : (float?)null;
+            var useBezier = (VM.Tuning?.GetTuning("feature", 0, 1) ?? 0) == 0;
+            var path = new LinkedList<VMIPathSegment>();
+            var debugRects = new List<VMWalkableRect>();
+            float heading = Caller.RadianDirection;
+
+            for (int i = 0; i < legs.Count; i++)
+            {
+                var leg = legs[i];
+                if (leg is VMRectRouteLeg)
+                {
+                    var rect = (VMRectRouteLeg)leg;
+                    var next = (i + 1 < legs.Count) ? legs[i + 1] : null;
+                    //arrive at a mouth already moving across the pinch
+                    float? outDir = (next != null) ? VMShimmyPlanner.Heading(next.From, next.To)
+                        : (CurRoute.FaceAnywhere ? (float?)null : CurRoute.RadianDirection);
+
+                    new VMRectRouter(null).OptimizeLines(rect.Rects, rect.To, inDir);
+                    var segments = useBezier ? VMPathBezierSegment.GeneratePath(rect.Rects, rect.To, inDir, outDir)
+                        : VMPathLineSegment.GeneratePath(rect.Rects, rect.To);
+                    if (segments == null) return false;
+                    foreach (var segment in segments) path.AddLast(segment);
+                    debugRects.AddRange(rect.Rects);
+                    if (path.Count > 0)
+                    {
+                        var last = path.Last.Value;
+                        if (last.Source != last.Destination)
+                            heading = (float)Math.Atan2(last.Destination.X - last.Source.X, last.Source.Y - last.Destination.Y);
+                    }
+                    inDir = null;
+                }
+                else
+                {
+                    var shimmy = (VMShimmyRouteLeg)leg;
+                    var move = VMShimmyPlanner.Heading(shimmy.From, shimmy.To);
+                    bool stepRight = false;
+                    //pets walk through facing forwards, Sims side-step facing the perpendicular nearest their heading.
+                    var facing = ((VMAvatar)Caller).IsPet ? move : VMShimmyPlanner.ChooseFacing(move, heading, out stepRight);
+                    path.AddLast(new VMPathShimmySegment(
+                        new Point(shimmy.From.X * 0x8000, shimmy.From.Y * 0x8000),
+                        new Point(shimmy.To.X * 0x8000, shimmy.To.Y * 0x8000),
+                        ((VMEntity)shimmy.Pinch.A.Owner).ObjectID,
+                        ((VMEntity)shimmy.Pinch.B.Owner).ObjectID,
+                        facing, stepRight));
+                    heading = facing;
+                    inDir = move;
+                }
+            }
+
+            WalkTo = path;
+            if (DEBUG_DRAW) DebugDraw(debugRects, planner);
+            AdvanceWaypoint();
+            return true;
+        }
+
+        private void DebugDraw(IEnumerable<VMWalkableRect> rects, VMShimmyPlanner planner = null)
         {
             if (rects == null || !VM.UseWorld) return;
             var component = new DebugLinesComponent(VM.Context.Blueprint);
@@ -410,6 +522,17 @@ namespace FSO.SimAntics.Engine
             foreach (var rect in rects)
             {
                 component.AddRectangle(rect.ToRectangle(), Color.White);
+            }
+
+            if (planner != null)
+            {
+                //pinches found in this room: the two footprints, and the side-step line between the mouths.
+                foreach (var pinch in planner.Pinches)
+                {
+                    component.AddRectangle(pinch.A.Footprint.ToRectangle(), Color.Yellow);
+                    component.AddRectangle(pinch.B.Footprint.ToRectangle(), Color.Yellow);
+                    component.AddLine(pinch.MouthA.ToVector2() / 16f, pinch.MouthB.ToVector2() / 16f, Color.Yellow);
+                }
             }
 
             var path = new List<Vector2>();
@@ -527,9 +650,7 @@ namespace FSO.SimAntics.Engine
                 if (Velocity > 0) Velocity--;
 
                 if (avatar.Animations.Count < 3) StartWalkAnimation();
-                avatar.Animations[0].Weight = (8 - Velocity) / 8f;
-                avatar.Animations[1].Weight = (Velocity / 8f) * 0.66f;
-                avatar.Animations[2].Weight = (Velocity / 8f) * 0.33f;
+                UpdateWalkWeights(avatar);
 
                 WaitTime--;
                 Timeout--;
@@ -743,21 +864,33 @@ namespace FSO.SimAntics.Engine
                         return VMPrimitiveExitCode.CONTINUE;
                     }
 
+                    var shimmySegment = CurrentPath as VMPathShimmySegment;
                     if (WalkTo.Count == 0 && MoveTotalFrames - MoveFrames <= 28 && CanPortalTurn()) //7+6+5+4...
                     {
                         //tail off
                         if (Velocity <= 0) Velocity = 1;
                         if (Velocity > 1) Velocity--;
                     }
+                    else if (shimmySegment == null && WalkTo.Count > 0 && WalkTo.First.Value is VMPathShimmySegment
+                        && MoveTotalFrames - MoveFrames <= 28)
+                    {
+                        //slow down to side-stepping speed before entering a pinch
+                        if (Velocity > ShimmyVelocity(avatar)) Velocity--;
+                        else if (Velocity < ShimmyVelocity(avatar)) Velocity++;
+                    }
                     else
                     {
                         //get started
                         if (Velocity < 8) Velocity++;
                     }
+                    if (shimmySegment != null)
+                    {
+                        if (Velocity > ShimmyVelocity(avatar)) Velocity = ShimmyVelocity(avatar);
+                        //after loading a save the in-place side-step animation must be rebuilt
+                        if (!avatar.IsPet && (avatar.Animations.Count != 2 || !VMShimmyAnimation.IsInPlace(avatar.Animations[1].Anim))) StartWalkAnimation();
+                    }
 
-                    avatar.Animations[0].Weight = (8 - Velocity) / 8f;
-                    avatar.Animations[1].Weight = (Velocity / 8f) * 0.66f;
-                    avatar.Animations[2].Weight = (Velocity / 8f) * 0.33f;
+                    UpdateWalkWeights(avatar);
 
                     MoveFrames += Velocity;
                     if (MoveFrames >= MoveTotalFrames)
@@ -789,7 +922,26 @@ namespace FSO.SimAntics.Engine
                     pos.Level = PreviousPosition.Level;
 
                     var storedDir = avatar.RadianDirection;
-                    var result = Caller.SetPosition(pos, Direction.NORTH, VM.Context);
+                    VMPlacementResult result;
+                    if (shimmySegment != null)
+                    {
+                        //the avatar box may overlap the two objects it is squeezing between, but nothing else.
+                        avatar.ShimmyIgnoreA = VM.GetObjectById(shimmySegment.ObjectA);
+                        avatar.ShimmyIgnoreB = VM.GetObjectById(shimmySegment.ObjectB);
+                        try
+                        {
+                            result = Caller.SetPosition(pos, Direction.NORTH, VM.Context);
+                        }
+                        finally
+                        {
+                            avatar.ShimmyIgnoreA = null;
+                            avatar.ShimmyIgnoreB = null;
+                        }
+                    }
+                    else
+                    {
+                        result = Caller.SetPosition(pos, Direction.NORTH, VM.Context);
+                    }
                     avatar.RadianDirection = storedDir;
                     if (result.Status != VMPlacementError.Success && result.Status != VMPlacementError.CantBeThroughWall)
                     {
@@ -918,23 +1070,35 @@ namespace FSO.SimAntics.Engine
                     avatar.RadianDirection = (float)TargetDirection; //(float)Math.Atan2(avatar.Velocity.X, -avatar.Velocity.Y); //y+ as north. x+ is -90 degrees.
 
                     var velocity = new Vector3(step.Item3 * Velocity, 0);
-                    var newTarget = Math.Atan2(velocity.X, -velocity.Y); //y+ as north. x+ is -90 degrees.
-                    var diff = DirectionUtils.Difference(newTarget, avatar.RadianDirection);
-                    var aDiff = Math.Abs(diff);
-                    if (aDiff > 0.25) {
-                        if (diff > 0) diff = 0.25;
-                        else diff = -0.25;
-                        if (aDiff > 0.5)
+                    double diff;
+                    if (shimmySegment != null)
+                    {
+                        //side-stepping: turn towards the shimmy facing, not the movement direction.
+                        diff = DirectionUtils.Difference(shimmySegment.Facing, avatar.RadianDirection);
+                        if (diff > 0.25) diff = 0.25;
+                        else if (diff < -0.25) diff = -0.25;
+                    }
+                    else
+                    {
+                        var newTarget = Math.Atan2(velocity.X, -velocity.Y); //y+ as north. x+ is -90 degrees.
+                        diff = DirectionUtils.Difference(newTarget, avatar.RadianDirection);
+                        var aDiff = Math.Abs(diff);
+                        if (aDiff > 0.25)
                         {
-                            if (Velocity > 4) Velocity -= 2;
-                            if (aDiff > 1)
+                            if (diff > 0) diff = 0.25;
+                            else diff = -0.25;
+                            if (aDiff > 0.5)
                             {
-                                if (Velocity > 2) Velocity -= 2;
-                                if (aDiff > Math.PI / 2) Velocity = 0; 
+                                if (Velocity > 4) Velocity -= 2;
+                                if (aDiff > 1)
+                                {
+                                    if (Velocity > 2) Velocity -= 2;
+                                    if (aDiff > Math.PI / 2) Velocity = 0;
+                                }
                             }
                         }
                     }
-                    
+
                     TargetDirection = DirectionUtils.Normalize(avatar.RadianDirection - diff);
                     avatar.TurnVelocity = diff;
                     //var velocity = Vector3.Lerp(PreviousPosition.ToVector3(), CurrentWaypoint.ToVector3(), Velocity / (float)MoveTotalFrames) - PreviousPosition.ToVector3();
@@ -1143,6 +1307,7 @@ namespace FSO.SimAntics.Engine
         {
             var obj = (VMAvatar)Caller;
             obj.SetObstacleStatic(false);
+            if (CurrentPath is VMPathShimmySegment && !obj.IsPet && StartShimmyAnimation(obj, (VMPathShimmySegment)CurrentPath)) return;
             var pool = VM.Context.RoomInfo[VM.Context.GetRoomAt(Caller.Position)].Room.IsPool;
             var anims = (pool) ? obj.SwimAnimations:obj.WalkAnimations;
 
@@ -1170,6 +1335,46 @@ namespace FSO.SimAntics.Engine
             anim.Loop = true;
         }
 
+        /// <summary>
+        /// Side-stepping uses [standing loop, in-place standing-adjust-e/w loop], blended by velocity like walking.
+        /// Returns false if the avatar has no usable side-step animation (it then keeps its walk animations).
+        /// </summary>
+        private bool StartShimmyAnimation(VMAvatar obj, VMPathShimmySegment segment)
+        {
+            var anims = obj.WalkAnimations;
+            var name = anims[segment.StepRight ? ANIM_ADJUST_RIGHT : ANIM_ADJUST_LEFT];
+            if (string.IsNullOrEmpty(name)) return false;
+            var shimmy = VMShimmyAnimation.Get(FSO.Content.Content.Get().AvatarAnimations.Get(name + ".anim"));
+            if (shimmy == null) return false;
+            if (obj.Animations.Count == 2 && obj.Animations[1].Anim == shimmy.Animation) return true;
+
+            obj.Animations.Clear();
+            var stand = PlayAnim(anims[3], obj);
+            stand.Weight = 0f;
+            stand.Loop = true;
+            var step = new VMAnimationState(shimmy.Animation, false);
+            step.Loop = true;
+            step.Weight = 1f;
+            //match the feet to the movement: one loop covers StepDistance at SHIMMY_VELOCITY/10 units per tick.
+            step.Speed = (SHIMMY_VELOCITY / 10f) * shimmy.Animation.NumFrames / shimmy.StepDistance;
+            obj.Animations.Add(step);
+            return true;
+        }
+
+        private void UpdateWalkWeights(VMAvatar avatar)
+        {
+            if (CurrentPath is VMPathShimmySegment && avatar.Animations.Count == 2)
+            {
+                var weight = Math.Min(1f, Velocity / (float)SHIMMY_VELOCITY);
+                avatar.Animations[0].Weight = 1 - weight;
+                avatar.Animations[1].Weight = weight;
+                return;
+            }
+            avatar.Animations[0].Weight = (8 - Velocity) / 8f;
+            avatar.Animations[1].Weight = (Velocity / 8f) * 0.66f;
+            avatar.Animations[2].Weight = (Velocity / 8f) * 0.33f;
+        }
+
         private VMAnimationState PlayAnim(string name, VMAvatar avatar)
         {
             var animation = FSO.Content.Content.Get().AvatarAnimations.Get(name + ".anim");
@@ -1184,7 +1389,9 @@ namespace FSO.SimAntics.Engine
 
             var point = WalkTo.First.Value;
             WalkTo.RemoveFirst();
+            var wasShimmy = CurrentPath is VMPathShimmySegment;
             CurrentPath = point;
+            var shimmy = CurrentPath as VMPathShimmySegment;
             /*
             if (WalkTo.Count > 0)
             {
@@ -1200,13 +1407,16 @@ namespace FSO.SimAntics.Engine
             MoveTotalFrames = CurrentPath.CalculateTotalFrames(); //((LotTilePos.Distance(CurrentWaypoint, Caller.Position) * 20) / 2);
             var avatar = (VMAvatar)Caller;
             if ((avatar.IsPet && avatar.GetPersonData(VMPersonDataVariable.PersonType) < 254) || InPool) MoveTotalFrames *= 2;
-            MoveTotalFrames = Math.Max(1, MoveTotalFrames/((WalkStyle == 1) ? 3 : 1));
+            //running does not speed up side-stepping
+            MoveTotalFrames = Math.Max(1, MoveTotalFrames/((WalkStyle == 1 && shimmy == null) ? 3 : 1));
             CurrentPath.UpdateTotalFrames(MoveTotalFrames);
 
             WalkDirection = Caller.RadianDirection;
             if (State == VMRoutingFrameState.WALKING) TargetDirection = WalkDirection;
+            else if (shimmy != null) TargetDirection = shimmy.Facing; //turn sideways before the first step
             else TargetDirection = Math.Atan2(CurrentPath.Destination.X - Caller.Position.x * 0x8000, Caller.Position.y * 0x8000 - CurrentPath.Destination.Y); //y+ as north. x+ is -90 degrees.
             TurnFrames = Math.Min(10, MoveTotalFrames);
+            if (State == VMRoutingFrameState.WALKING && (wasShimmy || shimmy != null)) StartWalkAnimation();
             return true;
         }
 

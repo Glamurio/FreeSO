@@ -1203,6 +1203,8 @@ namespace FSO.SimAntics
             }
             var allASolid = pflags.HasFlag(VMPlaceRequestFlags.AllAvatarsSolid);
             var meAllowAvatars = target.GetFlag(VMEntityFlags.AllowPersonIntersection) && !allASolid;
+            var shimmying = target as VMAvatar;
+            if (shimmying != null && shimmying.ShimmyIgnoreA == null && shimmying.ShimmyIgnoreB == null) shimmying = null;
 
             var ftsL = RoomInfo[room].StaticObstacles.AllIntersect(footprint);
             ftsL.AddRange(RoomInfo[room].DynamicObstacles.Where(x => x.Intersects(footprint) && ((VMEntityObstacle)x).Parent != target));
@@ -1211,6 +1213,7 @@ namespace FSO.SimAntics
             {
                 var obj = ((VMEntityObstacle)ft).Parent;
                 if (obj.MultitileGroup == target.MultitileGroup) continue;
+                if (shimmying != null && shimmying.ShimmyIgnores(obj)) continue; //side-stepping through a pinch between these objects
                 var ghost = (short)((target.GhostImage || obj.GhostImage) ? 1 : 0);
 
                 if ((!(target.ExecuteEntryPoint(5, this, true, obj, new short[] { obj.ObjectID, ghost, 0, 0 })
