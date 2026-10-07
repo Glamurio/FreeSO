@@ -72,17 +72,20 @@ namespace FSO.SimAntics.Engine.Routing
         public const int AVATAR_HALF = 3;
         //mouths sit this far outside the raw footprints (inflation + 1 unit of clearance)
         public const int MOUTH_OFFSET = AVATAR_HALF + 1;
-        //narrowest raw gap a Sim may side-step through.
+        //narrowest raw gap a Sim may side-step through: between two corners (diagonal pinch)...
         public const float MIN_PINCH_WIDTH = 3;
+        //...and between two parallel edges (straight gap), where the narrowest point runs the whole length of the
+        //gap. That needs more room than a corner: 3 units (half a Sim) is too tight, two chairs side by side (6) are not.
+        public const int MIN_STRAIGHT_GAP = 5;
         //longest overlap two side-by-side objects may have for the gap between them to count as a pinch.
         //longer corridors are not shimmied through (it would look like a Sim crab-walking along a counter).
         public const int MAX_STRAIGHT_LENGTH = 16;
-        //route costs are distances, so a shimmy is costed as the walking distance covered in the same time:
-        //side-stepping moves at 1/4 of full walking speed (velocity 2 vs 8), and slowing down and turning
-        //sideways and back costs roughly another 16 units. Sims therefore still walk around a pinch when the
-        //detour is modest, and only shimmy when it is the only way or saves a long walk.
-        public const int SHIMMY_COST_MULT = 4;
-        public const int SHIMMY_COST_ADD = 16;
+        //route costs are distances. A shimmy costs its length plus a small fixed amount, so Sims take the geometrically
+        //shorter path through a pinch and only keep walking around when that is about as short. (A time-based cost,
+        //4x length + 16, made Sims walk around anything but the narrowest chair-to-chair pinch, which players read
+        //as not finding the obvious route.)
+        public const int SHIMMY_COST_MULT = 1;
+        public const int SHIMMY_COST_ADD = 4;
         //bounds the work for unreachable destinations, where the search would otherwise try every pair of mouths.
         public const int MAX_PINCHES = 8;
         public const int MAX_ROUTES_PER_PLAN = 64;
@@ -180,7 +183,7 @@ namespace FSO.SimAntics.Engine.Routing
         /// </summary>
         private VMShimmyPinch TryStraight(VMShimmyCandidate a, VMShimmyCandidate b, bool transpose, int gap, int overlap)
         {
-            if (gap < MIN_PINCH_WIDTH || overlap > MAX_STRAIGHT_LENGTH) return null;
+            if (gap < MIN_STRAIGHT_GAP || overlap > MAX_STRAIGHT_LENGTH) return null;
             var fa = transpose ? Transpose(a.Footprint) : a.Footprint;
             var fb = transpose ? Transpose(b.Footprint) : b.Footprint;
             //gap is along x (after transposing), corridor runs along y.

@@ -54,6 +54,8 @@ namespace FSO.SimAntics.Engine
 
         //side-stepping speed through a pinch, in the same units as Velocity (full walking speed is 8).
         private const int SHIMMY_VELOCITY = 2;
+        //pets squeeze through walking forwards at half speed (their move frames are already doubled).
+        private const int SHIMMY_VELOCITY_PET = 4;
         //STR 150/151 (person walk animations): standing-adjust-w and standing-adjust-e
         private const int ANIM_ADJUST_LEFT = 14;
         private const int ANIM_ADJUST_RIGHT = 15;
@@ -429,12 +431,20 @@ namespace FSO.SimAntics.Engine
 
         private bool CanShimmy()
         {
-            //Sims only: pets have no side-step animations, and swimming is left alone.
+            //swimming is left alone.
             if (!VMShimmyPlanner.Enabled || !VM.TS1) return false;
             var avatar = Caller as VMAvatar;
-            if (avatar == null || avatar.IsPet || InPool) return false;
+            if (avatar == null || InPool) return false;
+            //CONFIRMED (ExpansionPack5.far, TemplateDog/TemplateCat STR 150): pets have no side-step animation, entries
+            //11-18 are "d2o-stand-still" or empty. Pets squeeze through facing forwards with their walk cycle instead.
+            if (avatar.IsPet) return true;
             var anims = avatar.WalkAnimations;
             return !string.IsNullOrEmpty(anims[ANIM_ADJUST_LEFT]) && !string.IsNullOrEmpty(anims[ANIM_ADJUST_RIGHT]);
+        }
+
+        private int ShimmyVelocity(VMAvatar avatar)
+        {
+            return avatar.IsPet ? SHIMMY_VELOCITY_PET : SHIMMY_VELOCITY;
         }
 
         /// <summary>
@@ -482,8 +492,9 @@ namespace FSO.SimAntics.Engine
                 {
                     var shimmy = (VMShimmyRouteLeg)leg;
                     var move = VMShimmyPlanner.Heading(shimmy.From, shimmy.To);
-                    bool stepRight;
-                    var facing = VMShimmyPlanner.ChooseFacing(move, heading, out stepRight);
+                    bool stepRight = false;
+                    //pets walk through facing forwards, Sims side-step facing the perpendicular nearest their heading.
+                    var facing = ((VMAvatar)Caller).IsPet ? move : VMShimmyPlanner.ChooseFacing(move, heading, out stepRight);
                     path.AddLast(new VMPathShimmySegment(
                         new Point(shimmy.From.X * 0x8000, shimmy.From.Y * 0x8000),
                         new Point(shimmy.To.X * 0x8000, shimmy.To.Y * 0x8000),
@@ -864,8 +875,8 @@ namespace FSO.SimAntics.Engine
                         && MoveTotalFrames - MoveFrames <= 28)
                     {
                         //slow down to side-stepping speed before entering a pinch
-                        if (Velocity > SHIMMY_VELOCITY) Velocity--;
-                        else if (Velocity < SHIMMY_VELOCITY) Velocity++;
+                        if (Velocity > ShimmyVelocity(avatar)) Velocity--;
+                        else if (Velocity < ShimmyVelocity(avatar)) Velocity++;
                     }
                     else
                     {
@@ -874,9 +885,9 @@ namespace FSO.SimAntics.Engine
                     }
                     if (shimmySegment != null)
                     {
-                        if (Velocity > SHIMMY_VELOCITY) Velocity = SHIMMY_VELOCITY;
+                        if (Velocity > ShimmyVelocity(avatar)) Velocity = ShimmyVelocity(avatar);
                         //after loading a save the in-place side-step animation must be rebuilt
-                        if (avatar.Animations.Count != 2 || !VMShimmyAnimation.IsInPlace(avatar.Animations[1].Anim)) StartWalkAnimation();
+                        if (!avatar.IsPet && (avatar.Animations.Count != 2 || !VMShimmyAnimation.IsInPlace(avatar.Animations[1].Anim))) StartWalkAnimation();
                     }
 
                     UpdateWalkWeights(avatar);
@@ -1296,7 +1307,7 @@ namespace FSO.SimAntics.Engine
         {
             var obj = (VMAvatar)Caller;
             obj.SetObstacleStatic(false);
-            if (CurrentPath is VMPathShimmySegment && StartShimmyAnimation(obj, (VMPathShimmySegment)CurrentPath)) return;
+            if (CurrentPath is VMPathShimmySegment && !obj.IsPet && StartShimmyAnimation(obj, (VMPathShimmySegment)CurrentPath)) return;
             var pool = VM.Context.RoomInfo[VM.Context.GetRoomAt(Caller.Position)].Room.IsPool;
             var anims = (pool) ? obj.SwimAnimations:obj.WalkAnimations;
 

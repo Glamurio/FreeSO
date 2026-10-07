@@ -3,9 +3,9 @@ using Microsoft.Xna.Framework;
 namespace FSO.SimAntics.Engine.Routing
 {
     /// <summary>
-    /// A straight path segment walked sideways through a pinch between two objects (see VMShimmyPlanner).
-    /// While on this segment the avatar faces Facing, plays the standing-adjust animation for its step direction,
-    /// and does not collide with ObjectA/ObjectB (or their multitile groups).
+    /// A straight path segment crossing a pinch between two objects (see VMShimmyPlanner). Sims side-step it facing
+    /// Facing with the standing-adjust animation for their step direction; pets walk it forwards (Facing is the move
+    /// heading). While on it, the avatar does not collide with ObjectA/ObjectB (or their multitile groups).
     /// </summary>
     public class VMPathShimmySegment : VMPathLineSegment
     {
