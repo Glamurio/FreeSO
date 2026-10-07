@@ -200,6 +200,16 @@ namespace FSO.SimAntics.Marshals.Threads
                         C = ReadPoint(reader),
                         D = ReadPoint(reader)
                     };
+                case 3: //shimmy (version 39+). type 2 is already written for unknown segments.
+                    {
+                        var from = ReadPoint(reader);
+                        var to = ReadPoint(reader);
+                        var objA = reader.ReadInt16();
+                        var objB = reader.ReadInt16();
+                        var facing = reader.ReadSingle();
+                        var right = reader.ReadBoolean();
+                        return new VMPathShimmySegment(from, to, objA, objB, facing, right);
+                    }
                 default: //invalid
                     return new VMPathLineSegment(new Point(), new Point());
             }
@@ -213,7 +223,19 @@ namespace FSO.SimAntics.Marshals.Threads
 
         private void WriteGenericSegment(VMIPathSegment seg, BinaryWriter writer)
         {
-            if (seg is VMPathLineSegment)
+            if (seg is VMPathShimmySegment)
+            {
+                //must be tested before VMPathLineSegment, which it extends.
+                writer.Write((byte)3);
+                var shimmy = (VMPathShimmySegment)seg;
+                WritePoint(shimmy.From, writer);
+                WritePoint(shimmy.To, writer);
+                writer.Write(shimmy.ObjectA);
+                writer.Write(shimmy.ObjectB);
+                writer.Write(shimmy.Facing);
+                writer.Write(shimmy.StepRight);
+            }
+            else if (seg is VMPathLineSegment)
             {
                 writer.Write((byte)0);
                 var line = (VMPathLineSegment)seg;

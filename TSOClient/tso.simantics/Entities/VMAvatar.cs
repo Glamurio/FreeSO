@@ -61,6 +61,19 @@ namespace FSO.SimAntics
         public Vector3 Velocity; //used for 60 fps walking animation
         public double TurnVelocity;
 
+        /// <summary>
+        /// Objects this avatar may overlap while side-stepping through a pinch between them (see VMShimmyPlanner).
+        /// Transient: only set by VMRoutingFrame around the SetPosition call of a shimmy segment, never saved.
+        /// </summary>
+        public VMEntity ShimmyIgnoreA;
+        public VMEntity ShimmyIgnoreB;
+
+        public bool ShimmyIgnores(VMEntity obj)
+        {
+            return (ShimmyIgnoreA != null && (obj == ShimmyIgnoreA || obj.MultitileGroup == ShimmyIgnoreA.MultitileGroup))
+                || (ShimmyIgnoreB != null && (obj == ShimmyIgnoreB || obj.MultitileGroup == ShimmyIgnoreB.MultitileGroup));
+        }
+
         private VMMotiveChange[] MotiveChanges = new VMMotiveChange[16];
         private VMIMotiveDecay MotiveDecay;
         private short[] PersonData = new short[101];
