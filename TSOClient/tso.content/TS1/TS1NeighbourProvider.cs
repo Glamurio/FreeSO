@@ -32,6 +32,23 @@ namespace FSO.Content.TS1
         public string UserPath;
         public int NextSim;
 
+        /// <summary>
+        /// Folders (each holding UserData, UserData2...) to take a player's existing saves from the first time Simitone
+        /// sets up a neighbourhood, best first. Set by the platform start-up. The game install itself is the fallback.
+        /// The Steam Legacy Collection keeps saves outside its install (Saved Games), so the install only has a template.
+        /// </summary>
+        public static List<string> SaveImportRoots = new List<string>();
+
+        private string FindSaveSource(string udName)
+        {
+            foreach (var root in SaveImportRoots)
+            {
+                var dir = Path.Combine(root, udName + "/").Replace('\\', '/');
+                if (File.Exists(Path.Combine(dir, "Neighborhood.iff"))) return dir;
+            }
+            return Path.Combine(ContentManager.TS1BasePath, udName + "/").Replace('\\', '/');
+        }
+
         public HashSet<uint> DirtyAvatars = new HashSet<uint>();
 
         public TS1NeighborhoodProvider(Content contentManager)
@@ -58,7 +75,7 @@ namespace FSO.Content.TS1
 
             if (!Directory.Exists(userPath))
             {
-                var source = Path.Combine(ContentManager.TS1BasePath, udName + "/");
+                var source = FindSaveSource(udName);
                 var destination = userPath;
 
                 //quick and dirty copy.
