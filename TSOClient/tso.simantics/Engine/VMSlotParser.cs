@@ -28,6 +28,20 @@ namespace FSO.SimAntics.Engine
             VMRouteFailCode.DestTileOccupied,
         };
 
+        //WallInWay was missing above, so SetFail could never report it (its index was -1). (VMFeatures.RoutingFixes)
+        private static VMRouteFailCode[] FailPrioFixed = {
+            VMRouteFailCode.NoValidGoals,
+            VMRouteFailCode.WallInWay,
+            VMRouteFailCode.NoChair,
+            VMRouteFailCode.DestTileOccupiedPerson,
+            VMRouteFailCode.DestTileOccupied,
+        };
+
+        private static int FailPriority(VMRouteFailCode code)
+        {
+            return Array.IndexOf(VMFeatures.RoutingFixes ? FailPrioFixed : FailPrio, code);
+        }
+
         private SLOTFlags Flags;
         private int MinProximity;
         private int MaxProximity;
@@ -323,7 +337,7 @@ namespace FSO.SimAntics.Engine
 
         private void SetFail(VMRouteFailCode code, VMEntity blocker)
         {
-            if (Array.IndexOf(FailPrio, code) > Array.IndexOf(FailPrio, FailCode))
+            if (FailPriority(code) > FailPriority(FailCode))
             {
                 FailCode = code;
                 Blocker = blocker;

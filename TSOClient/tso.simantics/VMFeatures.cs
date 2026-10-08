@@ -20,6 +20,24 @@ namespace FSO.SimAntics
         }
 
         /// <summary>
+        /// Routing bug fixes (roadmap 1a):
+        /// - the wait timeout and collision retries are given to each goal, instead of once per route request;
+        /// - a timed-out wait no longer discards every remaining goal on consecutive ticks;
+        /// - moving on to the next goal restarts goal handling (doors, chairs) instead of walking straight at it;
+        /// - "wall in the way" can be reported, and route failure blames the object actually in the way, not the Sim;
+        /// - the RouteResult person data is cleared when a route succeeds.
+        /// </summary>
+        public static bool RoutingFixes = true;
+
+        /// <summary>
+        /// Action queue bug fixes:
+        /// - TS1 interactions that allow dogs can be cancelled while queued (their TTAB flag shares a bit with TSO's
+        ///   "must run", which made cancelling them cancel the running action instead);
+        /// - queue skipping after a higher priority action no longer loops forever on items it can't remove.
+        /// </summary>
+        public static bool QueueFixes = true;
+
+        /// <summary>
         /// Record route events and the reason every queued action ended (see Diagnostics.VMDiagnostics).
         /// Does not change behaviour.
         /// </summary>

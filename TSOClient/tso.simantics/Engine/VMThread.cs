@@ -830,7 +830,11 @@ namespace FSO.SimAntics.Engine
                             i += 2;
                             while (i < this.Queue.Count)
                             {
-                                CancelAction(this.Queue[i].UID);
+                                var item = this.Queue[i];
+                                CancelAction(item.UID);
+                                //CancelAction does not remove items it can only flag (ParentIdle/ParentExit modes, or
+                                //"must run"), which made this loop forever. Step over them. (VMFeatures.QueueFixes)
+                                if (VMFeatures.QueueFixes && i < this.Queue.Count && this.Queue[i] == item) i++;
                             }
                         }
                         EvaluateQueuePriorities();
@@ -880,7 +884,8 @@ namespace FSO.SimAntics.Engine
                     }
                 }
 
-                var canQueueSkip = !interaction.Flags.HasFlag(TTABFlags.MustRun);
+                //TS1's "allow dogs" TTAB flag uses the same bit as TSO's MustRun. (VMFeatures.QueueFixes)
+                var canQueueSkip = (VMFeatures.QueueFixes && Context.VM.TS1) || !interaction.Flags.HasFlag(TTABFlags.MustRun);
 
                 if (canQueueSkip && (index > ActiveQueueBlock || Stack.LastOrDefault()?.ActionTree == false) && (interaction.Mode == Engine.VMQueueMode.Normal || interaction.Flags.HasFlag(TTABFlags.FSODirectControl)))
                 {

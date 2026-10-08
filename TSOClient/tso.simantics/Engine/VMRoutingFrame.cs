@@ -206,6 +206,12 @@ namespace FSO.SimAntics.Engine
             }
 
             if (found != VMRouteFailCode.Success) HardFail(code, blocker);
+            else if (VMFeatures.RoutingFixes && State != VMRoutingFrameState.INITIAL)
+            {
+                //the next goal may be in another room or be a chair: run it through the INITIAL state (portals, sit,
+                //stand up) rather than continuing to walk, which would head straight for its position.
+                State = VMRoutingFrameState.INITIAL;
+            }
         }
 
         private void HardFail(VMRouteFailCode code, VMEntity blocker)
@@ -324,6 +330,14 @@ namespace FSO.SimAntics.Engine
             WalkTo = null; //reset routing state
             AttemptedChair = false;
             TurnTweak = 0;
+            if (VMFeatures.RoutingFixes)
+            {
+                //each goal gets its own allowance (the field comments always said so, but nothing refilled them),
+                //and must not inherit a wait from the goal that was given up.
+                Timeout = WAIT_TIMEOUT;
+                Retries = MAX_RETRIES;
+                WaitTime = 0;
+            }
 
             VMDiagnostics.Route(Caller, VMRouteEventType.Goal, goal: route?.Position ?? Target?.Position, other: route?.Chair);
             var roomRoute = DoRoomRoute(route);
@@ -668,7 +682,14 @@ namespace FSO.SimAntics.Engine
                     VMDiagnostics.Route(Caller, VMRouteEventType.Timeout, VMRouteFailCode.NoPath, goal: CurRoute?.Position);
                     //try again. not sure if we should reset timeout for the new route
                     SoftFail(VMRouteFailCode.NoPath, null);
-                    if (State != VMRoutingFrameState.FAILED) {
+                    if (VMFeatures.RoutingFixes)
+                    {
+                        //AttemptRoute refilled the allowance and cleared the wait for the new goal. (Previously WaitTime
+                        //stayed above 0 with Timeout at 0, so every following tick gave up another goal.)
+                        WaitTime = 0;
+                        if (State != VMRoutingFrameState.FAILED) Velocity = 0;
+                    }
+                    else if (State != VMRoutingFrameState.FAILED) {
                         Velocity = 0;
                         State = VMRoutingFrameState.WALKING;
                     }
@@ -975,7 +996,7 @@ namespace FSO.SimAntics.Engine
                             //we already attempted to move around this avatar... if this happens too much give up.
                             if (AvatarsToConsider.Contains(colAvatar) && --Retries <= 0)
                             {
-                                SoftFail(VMRouteFailCode.NoPath, avatar);
+                                SoftFail(VMRouteFailCode.NoPath, VMFeatures.RoutingFixes ? colAvatar : avatar);
                                 return VMPrimitiveExitCode.CONTINUE;
                             }
                             bool jobLot = VM.GetGlobalValue(11) > -1;
@@ -1006,7 +1027,7 @@ namespace FSO.SimAntics.Engine
                             //todo: is this safe for the robot lot?
                             if (--Retries <= 0)
                             {
-                                SoftFail(VMRouteFailCode.NoPath, avatar);
+                                SoftFail(VMRouteFailCode.NoPath, VMFeatures.RoutingFixes ? result.Object : avatar);
                                 return VMPrimitiveExitCode.CONTINUE;
                             }
                         }
@@ -1142,7 +1163,12 @@ namespace FSO.SimAntics.Engine
         private void PreExit()
         {
             //about to exit the routing frame
-            if (State != VMRoutingFrameState.FAILED) VMDiagnostics.Route(Caller, VMRouteEventType.Arrived, goal: CurRoute?.Position);
+            if (State != VMRoutingFrameState.FAILED)
+            {
+                VMDiagnostics.Route(Caller, VMRouteEventType.Arrived, goal: CurRoute?.Position);
+                //a failed route sets RouteResult; without this a later successful route still reported the old failure.
+                if (VMFeatures.RoutingFixes && ParentRoute == null) ((VMAvatar)Caller).SetPersonData(VMPersonDataVariable.RouteResult, 0);
+            }
             if (DEBUG_DRAW && VM.UseWorld) DebugRemove();
             if (ParentRoute == null)
             {
