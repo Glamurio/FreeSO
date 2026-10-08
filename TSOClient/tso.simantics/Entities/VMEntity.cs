@@ -56,6 +56,8 @@ namespace FSO.SimAntics
 
         public VMRuntimeHeadline Headline;
         public VMHeadlineRenderer HeadlineRenderer; //IS NOT serialized, but rather regenerated on deserialize.
+        /// <summary>Recent route and action-queue events (Simitone diagnostics). Not serialized.</summary>
+        public Diagnostics.VMEntityDiagnostics Diagnostics;
 
         public GameObject Object;
         public VMThread Thread;

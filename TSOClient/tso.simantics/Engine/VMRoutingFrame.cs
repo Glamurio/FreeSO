@@ -11,6 +11,7 @@ using FSO.SimAntics.Engine.Routing;
 using FSO.SimAntics.Model.Routing;
 using FSO.SimAntics.Primitives;
 using FSO.SimAntics.Marshals.Threads;
+using FSO.SimAntics.Diagnostics;
 
 namespace FSO.SimAntics.Engine
 {
@@ -162,6 +163,7 @@ namespace FSO.SimAntics.Engine
 
             Slot = slot;
             Target = target;
+            VMDiagnostics.Route(Caller, VMRouteEventType.Begin, goal: target?.Position, detail: "slot route");
             var found = AttemptRoute(null);
 
             if (found == VMRouteFailCode.Success) return true;
@@ -175,6 +177,7 @@ namespace FSO.SimAntics.Engine
 
             Choices = choices; //should be ordered by most preferred first, with a little bit of random shuffling to keep things interesting for "wander"
             //style movements. Also includes flags dictating if this route goes through walls etc.
+            VMDiagnostics.Route(Caller, VMRouteEventType.Begin, detail: choices.Count + " goal(s)");
             var found = VMRouteFailCode.NoValidGoals;
             while (found != VMRouteFailCode.Success && Choices.Count > 0) {
                 found = AttemptRoute(Choices[0]);
@@ -193,6 +196,8 @@ namespace FSO.SimAntics.Engine
 
         public void SoftFail(VMRouteFailCode code, VMEntity blocker)
         {
+            VMDiagnostics.Route(Caller, VMRouteEventType.SoftFail, code, blocker, CurRoute?.Position,
+                (Choices?.Count ?? 0) + " goal(s) left");
             var found = VMRouteFailCode.NoValidGoals;
             while (found != VMRouteFailCode.Success && Choices != null && Choices.Count > 0)
             {
@@ -205,6 +210,7 @@ namespace FSO.SimAntics.Engine
 
         private void HardFail(VMRouteFailCode code, VMEntity blocker)
         {
+            VMDiagnostics.Route(Caller, VMRouteEventType.HardFail, code, blocker, CurRoute?.Position);
             State = VMRoutingFrameState.FAILED;
             var avatar = (VMAvatar)Caller;
             if (CallFailureTrees && ParentRoute == null)
@@ -319,7 +325,10 @@ namespace FSO.SimAntics.Engine
             AttemptedChair = false;
             TurnTweak = 0;
 
-            return (DoRoomRoute(route)) ? VMRouteFailCode.Success : VMRouteFailCode.NoRoomRoute;
+            VMDiagnostics.Route(Caller, VMRouteEventType.Goal, goal: route?.Position ?? Target?.Position, other: route?.Chair);
+            var roomRoute = DoRoomRoute(route);
+            if (!roomRoute) VMDiagnostics.Route(Caller, VMRouteEventType.NoRoomRoute, VMRouteFailCode.NoRoomRoute, goal: route?.Position ?? Target?.Position);
+            return roomRoute ? VMRouteFailCode.Success : VMRouteFailCode.NoRoomRoute;
         }
 
         /// <summary>
@@ -656,6 +665,7 @@ namespace FSO.SimAntics.Engine
                 Timeout--;
                 if (Timeout <= 0)
                 {
+                    VMDiagnostics.Route(Caller, VMRouteEventType.Timeout, VMRouteFailCode.NoPath, goal: CurRoute?.Position);
                     //try again. not sure if we should reset timeout for the new route
                     SoftFail(VMRouteFailCode.NoPath, null);
                     if (State != VMRoutingFrameState.FAILED) {
@@ -954,6 +964,8 @@ namespace FSO.SimAntics.Engine
                         CurrentPath.ResetToFrame(MoveFrames);
                         bool routeAround = true;
                         VMRoutingFrame colRoute = null;
+                        VMDiagnostics.Route(Caller, VMRouteEventType.Collision, VMRouteFailCode.Success, result.Object, CurRoute?.Position,
+                            result.Status.ToString() + ", " + Retries + " retries left");
 
                         if (result.Object != null && result.Object is VMAvatar)
                         {
@@ -1130,6 +1142,7 @@ namespace FSO.SimAntics.Engine
         private void PreExit()
         {
             //about to exit the routing frame
+            if (State != VMRoutingFrameState.FAILED) VMDiagnostics.Route(Caller, VMRouteEventType.Arrived, goal: CurRoute?.Position);
             if (DEBUG_DRAW && VM.UseWorld) DebugRemove();
             if (ParentRoute == null)
             {
@@ -1189,6 +1202,7 @@ namespace FSO.SimAntics.Engine
             if (State == VMRoutingFrameState.WALKING)
             {
                 //only wait if we're walking
+                if (WaitTime == 0) VMDiagnostics.Route(Caller, VMRouteEventType.Wait, goal: CurRoute?.Position, detail: waitTime + " ticks");
                 WaitTime = Math.Max(waitTime, WaitTime);
             }
         }
