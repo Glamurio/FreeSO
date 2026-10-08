@@ -5,6 +5,7 @@ using FSO.SimAntics.Model;
 using FSO.LotView.Model;
 using System.IO;
 using FSO.SimAntics.Model.TSOPlatform;
+using FSO.SimAntics.Engine.Routing;
 
 namespace FSO.SimAntics.Engine.Primitives
 {
@@ -68,6 +69,13 @@ namespace FSO.SimAntics.Engine.Primitives
             int bestScore = int.MinValue;
             VMEntity bestObj = null;
             var funcVar = ScoreVar[operand.Function];
+
+            //VMFeatures.ObjectSelection: the best object among the ones the caller can reach and has not just failed to
+            //route to is preferred. The overall best (the original answer) is still used when there is none.
+            var selection = VMFeatures.ObjectSelection && context.Caller is VMAvatar;
+            var reachable = selection ? VMReachability.RoomsReachableBy(context.Caller, context.VM.Context) : null;
+            int bestPreferredScore = int.MinValue;
+            VMEntity bestPreferred = null;
 
             var entry = FunctionToEntryPoint[operand.Function];
             for (int i=0; i<entities.Count; i++) {
@@ -135,10 +143,18 @@ namespace FSO.SimAntics.Engine.Primitives
                             bestScore = score;
                             bestObj = ent;
                         }
+                        if (selection && score > bestPreferredScore
+                            && VMReachability.CanReach(reachable, ent, context.VM.Context)
+                            && !VMRouteFailMemory.RecentlyFailed(context.Caller, ent))
+                        {
+                            bestPreferredScore = score;
+                            bestPreferred = ent;
+                        }
                     }
                 }
             }
 
+            if (bestPreferred != null) bestObj = bestPreferred;
             if (bestObj != null)
             {
                 context.StackObject = bestObj;

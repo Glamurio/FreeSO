@@ -163,6 +163,8 @@ namespace FSO.SimAntics.Engine
 
             Slot = slot;
             Target = target;
+            Retargets = 0;
+            TargetPosKnown = false;
             VMDiagnostics.Route(Caller, VMRouteEventType.Begin, goal: target?.Position, detail: "slot route");
             var found = AttemptRoute(null);
 
@@ -198,6 +200,13 @@ namespace FSO.SimAntics.Engine
         {
             VMDiagnostics.Route(Caller, VMRouteEventType.SoftFail, code, blocker, CurRoute?.Position,
                 (Choices?.Count ?? 0) + " goal(s) left");
+            if (VMFeatures.ApproachPositions && Slot != null && Choices != null && Choices.Count > 0)
+            {
+                //the remaining positions were chosen when the route started: check them against the lot as it is now.
+                var dropped = VMSlotParser.RecheckLocations(Choices, Slot, Caller, VM.Context);
+                if (dropped > 0) VMDiagnostics.Route(Caller, VMRouteEventType.Choices, goal: Target?.Position,
+                    detail: dropped + " remaining position(s) now taken, " + Choices.Count + " left");
+            }
             var found = VMRouteFailCode.NoValidGoals;
             while (found != VMRouteFailCode.Success && Choices != null && Choices.Count > 0)
             {
@@ -217,6 +226,9 @@ namespace FSO.SimAntics.Engine
         private void HardFail(VMRouteFailCode code, VMEntity blocker)
         {
             VMDiagnostics.Route(Caller, VMRouteEventType.HardFail, code, blocker, CurRoute?.Position);
+            //remembered so object selection and free will can prefer other objects for a while. Recording alone changes
+            //nothing (see VMFeatures.ObjectSelection, VMFeatures.AutonomyFixes). Failing to stand up says nothing about the target.
+            if (ParentRoute == null && Target != null && code != VMRouteFailCode.CantStand) VMRouteFailMemory.Record(Caller, Target);
             State = VMRoutingFrameState.FAILED;
             var avatar = (VMAvatar)Caller;
             if (CallFailureTrees && ParentRoute == null)
@@ -933,6 +945,11 @@ namespace FSO.SimAntics.Engine
                         var parser = new VMSlotParser(Slot);
 
                         Choices = parser.FindAvaliableLocations(Target, VM.Context, avatar);
+                        TargetPos = Target.Position;
+                        TargetPosKnown = true;
+                        if (VMFeatures.Diagnostics)
+                            VMDiagnostics.Route(Caller, VMRouteEventType.Choices, parser.FailCode, parser.Blocker, Target.Position,
+                                Choices.Count + " position(s); " + parser.DescribeRejections());
                         if (Choices.Count == 0)
                         {
                             HardFail(parser.FailCode, parser.Blocker);
@@ -1308,6 +1325,23 @@ namespace FSO.SimAntics.Engine
 
                     if (MoveTotalFrames == MoveFrames)
                     {
+                        if (VMFeatures.Conversations && shimmySegment == null && TargetMovedAway())
+                        {
+                            //walking up to a Sim who has since walked off: choose positions around where they are now.
+                            Retargets++;
+                            VMDiagnostics.Route(Caller, VMRouteEventType.Retarget, other: Target, goal: Target.Position,
+                                detail: "target moved away (" + Retargets + " of " + MAX_RETARGETS + ")");
+                            Choices = null;
+                            var retarget = AttemptRoute(null);
+                            if (retarget != VMRouteFailCode.Success)
+                            {
+                                HardFail(retarget, Target);
+                                return VMPrimitiveExitCode.CONTINUE;
+                            }
+                            Velocity = 0;
+                            State = VMRoutingFrameState.INITIAL;
+                            return VMPrimitiveExitCode.CONTINUE;
+                        }
                         if (VMFeatures.DynamicObstacles && WalkTo.Count > 0 && shimmySegment == null && RoomChangedSincePlan())
                         {
                             //an object was placed, moved or removed in this room since we planned: plan the rest again.
@@ -1383,8 +1417,72 @@ namespace FSO.SimAntics.Engine
             if (LastWalkStyle != -1) WalkStyle = LastWalkStyle;
         }
 
+        //VMFeatures.Conversations: re-targeting a Sim that walked away. Not saved; after loading, the target's position
+        //is taken again at the next waypoint.
+        private LotTilePos TargetPos;
+        private bool TargetPosKnown;
+        private int Retargets;
+        private const int MAX_RETARGETS = 3;
+        private const int RETARGET_DISTANCE = 24;
+
+        /// <summary>
+        /// True if this route walks up to an avatar that has moved more than 1.5 tiles (or changed floors) since its
+        /// positions were chosen. (VMFeatures.Conversations)
+        /// </summary>
+        private bool TargetMovedAway()
+        {
+            if (Slot == null || ParentRoute != null || Retargets >= MAX_RETARGETS) return false;
+            var target = Target as VMAvatar;
+            if (target == null || target.Dead || target == Caller || target.Position == LotTilePos.OUT_OF_WORLD) return false;
+            if (!TargetPosKnown)
+            {
+                TargetPos = target.Position;
+                TargetPosKnown = true;
+                return false;
+            }
+            if (target.Position.Level != TargetPos.Level) return true;
+            var dx = target.Position.x - TargetPos.x;
+            var dy = target.Position.y - TargetPos.y;
+            return dx * dx + dy * dy > RETARGET_DISTANCE * RETARGET_DISTANCE;
+        }
+
+        /// <summary>
+        /// True if the avatar is in a social interaction: one of its active actions targets another avatar, or another
+        /// avatar's active action targets it. (VMFeatures.Conversations)
+        /// </summary>
+        private bool IsSocialising(VMAvatar other)
+        {
+            var thread = other.Thread;
+            if (thread == null) return false;
+            for (int i = 0; i <= thread.ActiveQueueBlock && i < thread.Queue.Count; i++)
+            {
+                var callee = thread.Queue[i].Callee;
+                if (callee is VMAvatar && callee != other) return true;
+            }
+            foreach (var ava in VM.Context.ObjectQueries.Avatars)
+            {
+                if (ava == other || ava.Thread == null) continue;
+                var queue = ava.Thread.Queue;
+                for (int i = 0; i <= ava.Thread.ActiveQueueBlock && i < queue.Count; i++)
+                {
+                    if (queue[i].Callee == other) return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>True if the action this Sim is running was queued by the player (not free will).</summary>
+        private bool RunningPlayerAction()
+        {
+            return Thread.ActiveQueueBlock >= 0 && Thread.Queue.Count > 0 && Thread.Queue[0].Priority > (short)VMQueuePriority.Autonomous;
+        }
+
         private bool CanShooAvatar(VMAvatar avatar)
         {
+            //free will walks wait for socialising Sims instead of breaking up their conversation. The player's own
+            //commands still shoo, as before.
+            if (VMFeatures.Conversations && !RunningPlayerAction() && IsSocialising(avatar)) return false;
+
             VMRoutingFrame topRoute = null;
             //look for top frame
             for (int i = avatar.Thread.Stack.Count - 1; i >= 0; i--)

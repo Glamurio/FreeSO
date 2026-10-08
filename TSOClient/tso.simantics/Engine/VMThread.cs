@@ -254,6 +254,32 @@ namespace FSO.SimAntics.Engine
             }
         }
 
+        /// <summary>
+        /// The running action's object was deleted (VMFeatures.QueueRecovery). The entity is still reset, as before, to
+        /// clear the stack the action left behind, but the actions queued after it are put back: the player's queue used
+        /// to be wiped by one deleted object (a visitor leaving, a plate cleared away, an object sold).
+        /// Sub-actions of the deleted action (other active items, "parent idle/exit" items) and actions on other deleted
+        /// objects are dropped with it.
+        /// </summary>
+        private void ResetKeepingQueue()
+        {
+            var keep = new List<VMQueuedAction>();
+            for (int i = 0; i < Queue.Count; i++)
+            {
+                var item = Queue[i];
+                if (i == 0) VMDiagnostics.ActionEnded(Entity, item, VMActionEndReason.CalleeDeleted);
+                else if (i <= ActiveQueueBlock || item.Mode != VMQueueMode.Normal || item.Callee == null || item.Callee.Dead)
+                    VMDiagnostics.ActionEnded(Entity, item, VMActionEndReason.Pruned);
+                else keep.Add(item);
+            }
+            Entity.Reset(Context);
+            if (keep.Count > 0)
+            {
+                Queue.AddRange(keep);
+                QueueDirty = true;
+            }
+        }
+
         private void EndCurrentInteraction(VMActionEndReason reason)
         {
             QueueDirty = true;
@@ -358,12 +384,16 @@ namespace FSO.SimAntics.Engine
                     }
                     else //interaction owner is dead, rip
                     {
-                        if (!IsCheck)
+                        if (VMFeatures.QueueRecovery && !IsCheck) ResetKeepingQueue();
+                        else
                         {
-                            for (int i = 0; i < Queue.Count; i++)
-                                VMDiagnostics.ActionEnded(Entity, Queue[i], (i == 0) ? VMActionEndReason.CalleeDeleted : VMActionEndReason.OwnerDeadReset);
+                            if (!IsCheck)
+                            {
+                                for (int i = 0; i < Queue.Count; i++)
+                                    VMDiagnostics.ActionEnded(Entity, Queue[i], (i == 0) ? VMActionEndReason.CalleeDeleted : VMActionEndReason.OwnerDeadReset);
+                            }
+                            Entity.Reset(Context);
                         }
-                        Entity.Reset(Context);
                     }
                 }
 

@@ -53,6 +53,48 @@ namespace FSO.SimAntics
         public static bool Unstick = true;
 
         /// <summary>
+        /// Approach positions (roadmap 2): a chair someone is sitting in is not chosen as a destination
+        /// (DestChairOccupied), and when a destination fails, the remaining ones are checked again before walking to the
+        /// next (dropped if an object or a sitting Sim now takes them, tried last if a Sim stands there or is heading
+        /// there). Only the content-provided positions are filtered and reordered; none are invented.
+        /// </summary>
+        public static bool ApproachPositions = true;
+
+        /// <summary>
+        /// Object selection (roadmap 4): "find best object for function" prefers objects in rooms the Sim can reach and
+        /// objects the Sim has not just failed to route to. When no object passes, the original choice is made, so
+        /// content always gets the same answer as before when there is no better one. Player commands are unchanged.
+        /// </summary>
+        public static bool ObjectSelection = true;
+
+        /// <summary>
+        /// Queue recovery (roadmap 5): when the object the running action uses is deleted, only that action (and its
+        /// sub-actions) is dropped; the player's other queued actions are kept. Previously the Sim was reset with an empty
+        /// queue.
+        /// </summary>
+        public static bool QueueRecovery = true;
+
+        /// <summary>
+        /// Free will fixes (roadmap 6): objects whose lockout count is running are skipped (as "find best object" already
+        /// does), and objects in rooms the Sim can't reach or that it just failed to route to score much lower.
+        /// </summary>
+        public static bool AutonomyFixes = true;
+
+        /// <summary>
+        /// Free will balance fix (roadmap 6): an action with several pie menu entries was added to the candidate list
+        /// once per entry (always as its first entry), multiplying its chance of being picked. Each action now counts
+        /// once. Changes how often such actions are chosen, so it has its own switch.
+        /// </summary>
+        public static bool AutonomyCountOnce = true;
+
+        /// <summary>
+        /// Conversations (roadmap 10, partial): a Sim acting on free will waits for socialising Sims instead of shooing
+        /// them out of the way (player-directed actions still shoo), and a Sim walking up to another Sim who moves away
+        /// re-targets them (up to 3 times per route) instead of walking to where they were.
+        /// </summary>
+        public static bool Conversations = true;
+
+        /// <summary>
         /// Record route events and the reason every queued action ended (see Diagnostics.VMDiagnostics).
         /// Does not change behaviour.
         /// </summary>

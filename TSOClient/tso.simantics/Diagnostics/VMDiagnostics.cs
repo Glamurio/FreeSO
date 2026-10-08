@@ -32,7 +32,8 @@ namespace FSO.SimAntics.Diagnostics
         OwnerDeadReset,
         /// <summary>A SimAntics exception reset the avatar.</summary>
         Exception,
-        /// <summary>Removed by Simitone's queue recovery.</summary>
+        /// <summary>Dropped by Simitone's queue recovery along with a deleted object's action (its sub-actions, or another
+        /// action on a deleted object); the rest of the queue was kept.</summary>
         Pruned,
     }
 
@@ -66,6 +67,10 @@ namespace FSO.SimAntics.Diagnostics
         DoorRetry,
         /// <summary>The avatar was moved out of an obstacle it was standing in.</summary>
         Unstuck,
+        /// <summary>Destination positions were chosen for a slot; the detail lists why others were left out.</summary>
+        Choices,
+        /// <summary>The Sim being walked to moved away, so its positions were chosen again.</summary>
+        Retarget,
     }
 
     public struct VMRouteEvent
@@ -87,6 +92,8 @@ namespace FSO.SimAntics.Diagnostics
         public string Name;
         public short Callee;
         public short Priority;
+        /// <summary>The queued action's UID (VMQueuedAction.UID), so the client can match it to its queue display.</summary>
+        public ushort UID;
     }
 
     /// <summary>A fixed-size buffer keeping the most recent items.</summary>
@@ -137,7 +144,10 @@ namespace FSO.SimAntics.Diagnostics
     /// </summary>
     public static class VMDiagnostics
     {
-        /// <summary>Raised whenever an action leaves an avatar's queue (on the VM thread).</summary>
+        /// <summary>
+        /// Raised whenever an action leaves an avatar's queue (on the VM thread), whether or not diagnostics are being
+        /// recorded. Used by the client to say why a queued action disappeared.
+        /// </summary>
         public static event Action<VMEntity, VMActionEnd> OnActionEnded;
 
         private static VMEntityDiagnostics For(VMEntity ent)
@@ -173,18 +183,21 @@ namespace FSO.SimAntics.Diagnostics
 
         public static void ActionEnded(VMEntity ent, VMQueuedAction action, VMActionEndReason reason)
         {
+            if (action == null || !(ent is VMAvatar)) return;
             var d = For(ent);
-            if (d == null || action == null) return;
+            var listeners = OnActionEnded;
+            if (d == null && listeners == null) return;
             var end = new VMActionEnd()
             {
                 Tick = Tick(ent),
                 Reason = reason,
                 Name = action.Name,
                 Callee = action.Callee?.ObjectID ?? 0,
-                Priority = action.Priority
+                Priority = action.Priority,
+                UID = action.UID
             };
-            d.Actions.Add(end);
-            OnActionEnded?.Invoke(ent, end);
+            d?.Actions.Add(end);
+            listeners?.Invoke(ent, end);
         }
 
         /// <summary>
