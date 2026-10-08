@@ -38,6 +38,21 @@ namespace FSO.SimAntics
         public static bool QueueFixes = true;
 
         /// <summary>
+        /// Dynamic obstacle handling (roadmap 1b):
+        /// - Sims standing still are planned around instead of walked into (falls back to the old behaviour, walking up
+        ///   and asking them to move, when there is no way around);
+        /// - a route is planned again when an object in the room is placed, moved or removed while walking;
+        /// - a door that failed is tried once more after a short wait when there is no other way.
+        /// </summary>
+        public static bool DynamicObstacles = true;
+
+        /// <summary>
+        /// A Sim whose position overlaps an object (after build mode changes, or an animation that ended inside its
+        /// clearance) steps out to the nearest free spot instead of failing every route. (roadmap 1c)
+        /// </summary>
+        public static bool Unstick = true;
+
+        /// <summary>
         /// Record route events and the reason every queued action ended (see Diagnostics.VMDiagnostics).
         /// Does not change behaviour.
         /// </summary>

@@ -579,10 +579,24 @@ namespace FSO.SimAntics
             }
         }
 
+        /// <summary>
+        /// Per room, incremented whenever a (not carried) object with a footprint is placed, moved or removed in it.
+        /// Routing frames compare it to the value they planned with, to plan again (VMFeatures.DynamicObstacles).
+        /// Not saved.
+        /// </summary>
+        public int[] RoomObjectVersion = new int[0];
+
+        private void BumpRoomObjects(VMEntity obj, ushort room)
+        {
+            if (!(obj is VMGameObject) || obj.Container != null || obj.Footprint == null) return;
+            if (room < RoomObjectVersion.Length) RoomObjectVersion[room]++;
+        }
+
         public void RegeneratePortalInfo()
         {
             DeferredLightingRefresh.Clear();
             RoomInfo = new VMRoomInfo[Architecture.RoomData.Count()];
+            if (RoomObjectVersion.Length != RoomInfo.Length) RoomObjectVersion = new int[RoomInfo.Length];
             for (int i = 0; i < RoomInfo.Length; i++)
             {
                 RoomInfo[i].Entities = new List<VMEntity>();
@@ -941,6 +955,7 @@ namespace FSO.SimAntics
 
             //add object to room
             var room = GetObjectRoom(obj);
+            BumpRoomObjects(obj, room);
             if (roomChange)
             {
                 var roomInfo = RoomInfo[room];
@@ -992,6 +1007,7 @@ namespace FSO.SimAntics
         {
             //remove object from room
 
+            BumpRoomObjects(obj, GetObjectRoom(obj));
             if (roomChange)
             {
                 var room = GetObjectRoom(obj);
