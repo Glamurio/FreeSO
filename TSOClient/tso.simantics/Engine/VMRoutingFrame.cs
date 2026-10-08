@@ -11,6 +11,7 @@ using FSO.SimAntics.Engine.Routing;
 using FSO.SimAntics.Model.Routing;
 using FSO.SimAntics.Primitives;
 using FSO.SimAntics.Marshals.Threads;
+using FSO.SimAntics.Diagnostics;
 
 namespace FSO.SimAntics.Engine
 {
@@ -162,6 +163,9 @@ namespace FSO.SimAntics.Engine
 
             Slot = slot;
             Target = target;
+            Retargets = 0;
+            TargetPosKnown = false;
+            VMDiagnostics.Route(Caller, VMRouteEventType.Begin, goal: target?.Position, detail: "slot route");
             var found = AttemptRoute(null);
 
             if (found == VMRouteFailCode.Success) return true;
@@ -175,6 +179,7 @@ namespace FSO.SimAntics.Engine
 
             Choices = choices; //should be ordered by most preferred first, with a little bit of random shuffling to keep things interesting for "wander"
             //style movements. Also includes flags dictating if this route goes through walls etc.
+            VMDiagnostics.Route(Caller, VMRouteEventType.Begin, detail: choices.Count + " goal(s)");
             var found = VMRouteFailCode.NoValidGoals;
             while (found != VMRouteFailCode.Success && Choices.Count > 0) {
                 found = AttemptRoute(Choices[0]);
@@ -193,6 +198,15 @@ namespace FSO.SimAntics.Engine
 
         public void SoftFail(VMRouteFailCode code, VMEntity blocker)
         {
+            VMDiagnostics.Route(Caller, VMRouteEventType.SoftFail, code, blocker, CurRoute?.Position,
+                (Choices?.Count ?? 0) + " goal(s) left");
+            if (VMFeatures.ApproachPositions && Slot != null && Choices != null && Choices.Count > 0)
+            {
+                //the remaining positions were chosen when the route started: check them against the lot as it is now.
+                var dropped = VMSlotParser.RecheckLocations(Choices, Slot, Caller, VM.Context);
+                if (dropped > 0) VMDiagnostics.Route(Caller, VMRouteEventType.Choices, goal: Target?.Position,
+                    detail: dropped + " remaining position(s) now taken, " + Choices.Count + " left");
+            }
             var found = VMRouteFailCode.NoValidGoals;
             while (found != VMRouteFailCode.Success && Choices != null && Choices.Count > 0)
             {
@@ -201,10 +215,20 @@ namespace FSO.SimAntics.Engine
             }
 
             if (found != VMRouteFailCode.Success) HardFail(code, blocker);
+            else if (VMFeatures.RoutingFixes && State != VMRoutingFrameState.INITIAL)
+            {
+                //the next goal may be in another room or be a chair: run it through the INITIAL state (portals, sit,
+                //stand up) rather than continuing to walk, which would head straight for its position.
+                State = VMRoutingFrameState.INITIAL;
+            }
         }
 
         private void HardFail(VMRouteFailCode code, VMEntity blocker)
         {
+            VMDiagnostics.Route(Caller, VMRouteEventType.HardFail, code, blocker, CurRoute?.Position);
+            //remembered so object selection and free will can prefer other objects for a while. Recording alone changes
+            //nothing (see VMFeatures.ObjectSelection, VMFeatures.AutonomyFixes). Failing to stand up says nothing about the target.
+            if (ParentRoute == null && Target != null && code != VMRouteFailCode.CantStand) VMRouteFailMemory.Record(Caller, Target);
             State = VMRoutingFrameState.FAILED;
             var avatar = (VMAvatar)Caller;
             if (CallFailureTrees && ParentRoute == null)
@@ -318,14 +342,50 @@ namespace FSO.SimAntics.Engine
             WalkTo = null; //reset routing state
             AttemptedChair = false;
             TurnTweak = 0;
+            if (VMFeatures.RoutingFixes)
+            {
+                //each goal gets its own allowance (the field comments always said so, but nothing refilled them),
+                //and must not inherit a wait from the goal that was given up.
+                Timeout = WAIT_TIMEOUT;
+                Retries = MAX_RETRIES;
+                WaitTime = 0;
+            }
+            PortalRetries = 0;
 
-            return (DoRoomRoute(route)) ? VMRouteFailCode.Success : VMRouteFailCode.NoRoomRoute;
+            VMDiagnostics.Route(Caller, VMRouteEventType.Goal, goal: route?.Position ?? Target?.Position, other: route?.Chair);
+            var roomRoute = DoRoomRoute(route);
+            if (!roomRoute) VMDiagnostics.Route(Caller, VMRouteEventType.NoRoomRoute, VMRouteFailCode.NoRoomRoute, goal: route?.Position ?? Target?.Position);
+            return roomRoute ? VMRouteFailCode.Success : VMRouteFailCode.NoRoomRoute;
         }
 
         /// <summary>
         /// Pathfinds to the destination position from the current. The room pathfind should get us to the same room before we do this.
         /// </summary>
-        private bool AttemptWalk() 
+        private bool AttemptWalk()
+        {
+            if (VMFeatures.DynamicObstacles)
+            {
+                if (AttemptWalkWith(true)) return true;
+                //A Sim standing still made the room impassable to the planner. Plan as before, so the Sim walks up to
+                //them and the collision handling waits or asks them to move.
+                if (!IncludedStandingAvatars) return false;
+            }
+            return AttemptWalkWith(false);
+        }
+
+        //set by AttemptWalkWith when a standing avatar was added only because of VMFeatures.DynamicObstacles.
+        private bool IncludedStandingAvatars;
+        //room and object version the current walk was planned with (VMFeatures.DynamicObstacles). Not saved: a loaded
+        //route plans again at most once.
+        private ushort PlannedRoom;
+        private int PlannedObjectVersion;
+        //per goal: how many times a failed door was tried again (VMFeatures.DynamicObstacles)
+        private int PortalRetries;
+
+        private const int ESCAPE_RADIUS = 24;
+        private const int STANDING_GOAL_CLEARANCE = 8;
+
+        private bool AttemptWalkWith(bool standingAvatars)
         {
             //find shortest path to destination tile. Simple A* pathfind.
             //portals are used to traverse floors, so we do not care about the floor each point is on.
@@ -336,6 +396,7 @@ namespace FSO.SimAntics.Engine
             //CurrentPath.CalculateTotalFrames();
             //CurrentWaypoint = CurRoute.Position;
             WalkTo = null;
+            IncludedStandingAvatars = false;
 
             var startPoint = new Point((int)startPos.x, (int)startPos.y);
             var endPoint = new Point((int)CurRoute.Position.x, (int)CurRoute.Position.y);
@@ -366,20 +427,25 @@ namespace FSO.SimAntics.Engine
 
             var considerAvatars = !Caller.GetFlag(VMEntityFlags.AllowPersonIntersection);
             var shimmyCandidates = CanShimmy() ? new List<VMShimmyCandidate>() : null;
+            var objectObstacles = new List<KeyValuePair<VMEntity, VMObstacle>>();
 
             foreach (var obj in roomInfo.Entities)
             {
                 var ft = obj.Footprint;
 
                 var flags = (VMEntityFlags)obj.GetValue(VMStackObjectVariable.Flags);
+                bool standing = false;
                 if (obj != Caller && ft != null &&
-                    (obj is VMGameObject || (considerAvatars && AvatarsToConsider.Contains(obj))) &&
+                    (obj is VMGameObject || (considerAvatars && (AvatarsToConsider.Contains(obj)
+                        || (standing = standingAvatars && IsStandingInTheWay(obj, startPoint, endPoint))))) &&
                     ((flags & VMEntityFlags.DisallowPersonIntersection) > 0 || (flags & VMEntityFlags.AllowPersonIntersection) == 0)
                     && (!(Caller.ExecuteEntryPoint(5, VM.Context, true, obj, new short[] { obj.ObjectID, 1, 0, 0 })
                         || obj.ExecuteEntryPoint(5, VM.Context, true, Caller, new short[] { Caller.ObjectID, 1, 0, 0 }))))
                 {
                     var inflated = new VMObstacle(ft.x1 - 3, ft.y1 - 3, ft.x2 + 3, ft.y2 + 3);
                     obstacles.Add(inflated);
+                    if (standing) IncludedStandingAvatars = true;
+                    if (obj is VMGameObject) objectObstacles.Add(new KeyValuePair<VMEntity, VMObstacle>(obj, inflated));
                     if (shimmyCandidates != null && obj is VMGameObject)
                     {
                         shimmyCandidates.Add(new VMShimmyCandidate()
@@ -395,14 +461,30 @@ namespace FSO.SimAntics.Engine
 
             int dir = (int)DirectionUtils.PosMod(Math.Round(Caller.RadianDirection / (Math.PI / 2f)), 4);
 
+            VMShimmyPlanner planner = null;
             if (shimmyCandidates != null && shimmyCandidates.Count > 1)
             {
                 //with no pinches in the room this falls through to the unchanged legacy route below.
-                var planner = new VMShimmyPlanner(obstacles, shimmyCandidates);
-                if (planner.Pinches.Count > 0) return AttemptShimmyWalk(planner, startPoint, endPoint, dir);
+                planner = new VMShimmyPlanner(obstacles, shimmyCandidates);
+                if (planner.Pinches.Count == 0) planner = null;
+                else if (AttemptShimmyWalk(planner, startPoint, endPoint, dir)) return Planned(myRoom, null);
             }
 
-            if (obstacles.SearchForIntersect(new VMObstacle(startPoint, startPoint))) return false;
+            VMPathShimmySegment escape = null;
+            if (obstacles.SearchForIntersect(new VMObstacle(startPoint, startPoint)))
+            {
+                //standing inside an obstacle's clearance: no route can start here.
+                if (!VMFeatures.Unstick) return false;
+                escape = FindEscape(obstacles, objectObstacles, startPoint, endPoint);
+                if (escape == null) return false;
+                startPoint = new Point(escape.To.X / 0x8000, escape.To.Y / 0x8000);
+                if (planner != null)
+                {
+                    if (!AttemptShimmyWalk(planner, startPoint, endPoint, dir)) return false;
+                    return Planned(myRoom, escape);
+                }
+            }
+            else if (planner != null) return false; //the planner already tried every way, including the direct one
 
             var router = new VMRectRouter(obstacles);
 
@@ -425,8 +507,115 @@ namespace FSO.SimAntics.Engine
             {
                 //if (WalkTo.First.Value.Source != endPoint && WalkTo.Count > 1) WalkTo.RemoveFirst();
                 AdvanceWaypoint();
+                return Planned(myRoom, escape);
             }
-            return (WalkTo != null);
+            return false;
+        }
+
+        /// <summary>
+        /// Records what the new walk was planned with, and puts the escape step (if any) in front of it.
+        /// </summary>
+        private bool Planned(ushort room, VMPathShimmySegment escape)
+        {
+            if (escape != null && WalkTo != null)
+            {
+                //the planner already made its first segment current: put it back behind the escape step.
+                if (CurrentPath != null) WalkTo.AddFirst(CurrentPath);
+                WalkTo.AddFirst(escape);
+                CurrentPath = null;
+                AdvanceWaypoint();
+                VMDiagnostics.Route(Caller, VMRouteEventType.Unstuck, other: VM.GetObjectById(escape.ObjectA),
+                    goal: CurRoute?.Position, detail: "stepped out of an object's clearance");
+            }
+            PlannedRoom = room;
+            var versions = VM.Context.RoomObjectVersion;
+            PlannedObjectVersion = (room < versions.Length) ? versions[room] : 0;
+            return true;
+        }
+
+        /// <summary>
+        /// True if the room the walk was planned in had an object placed, moved or removed since.
+        /// </summary>
+        private bool RoomChangedSincePlan()
+        {
+            var room = VM.Context.GetRoomAt(Caller.Position);
+            if (room != PlannedRoom) return false;
+            var versions = VM.Context.RoomObjectVersion;
+            return room < versions.Length && versions[room] != PlannedObjectVersion;
+        }
+
+        /// <summary>
+        /// A Sim that is standing still (not walking a route) and is not at our start or our destination. Such Sims are
+        /// planned around (VMFeatures.DynamicObstacles). Sims near the destination are left to the existing collision
+        /// handling, which waits for them or asks them to move.
+        /// </summary>
+        private bool IsStandingInTheWay(VMEntity obj, Point start, Point end)
+        {
+            var avatar = obj as VMAvatar;
+            if (avatar == null || avatar.Container != null || avatar.Dead) return false;
+            var top = avatar.Thread?.Stack.LastOrDefault() as VMRoutingFrame;
+            if (top != null && top.WaitTime == 0 && top.State != VMRoutingFrameState.FAILED) return false; //walking
+            var ft = avatar.Footprint;
+            var clear = new VMObstacle(ft.x1 - STANDING_GOAL_CLEARANCE, ft.y1 - STANDING_GOAL_CLEARANCE,
+                ft.x2 + STANDING_GOAL_CLEARANCE, ft.y2 + STANDING_GOAL_CLEARANCE);
+            return !clear.HardContains(start) && !clear.HardContains(end);
+        }
+
+        /// <summary>
+        /// For a Sim standing inside the clearance of one or two objects: the nearest free point within 1.5 tiles
+        /// (preferring the direction of the goal), as a step that may overlap those objects, like a shimmy.
+        /// Returns null if more objects, a Sim or a wall trap it, or nothing is free nearby.
+        /// </summary>
+        private VMPathShimmySegment FindEscape(VMObstacleSet obstacles, List<KeyValuePair<VMEntity, VMObstacle>> objects, Point start, Point end)
+        {
+            var trapping = objects.Where(x => x.Value.HardContains(start)).ToList();
+            if (trapping.Count == 0 || trapping.Count > 2) return null;
+            //something else (a Sim, a wall, a third object) also covers the start: leave it to the old behaviour.
+            var trappingObs = new HashSet<VMObstacle>(trapping.Select(x => x.Value));
+            if (obstacles.AllIntersect(new VMObstacle(start, start)).Any(x => !trappingObs.Contains(x))) return null;
+
+            Point? best = null;
+            double bestScore = double.MaxValue;
+            for (int r = 2; r <= ESCAPE_RADIUS && best == null; r += 2)
+            {
+                for (int i = 0; i < 16; i++)
+                {
+                    var a = i * Math.PI / 8;
+                    var p = new Point(start.X + (int)Math.Round(Math.Cos(a) * r), start.Y + (int)Math.Round(Math.Sin(a) * r));
+                    if (obstacles.SearchForIntersect(new VMObstacle(p, p))) continue;
+                    if (!EscapeClear(obstacles, trappingObs, start, p)) continue;
+                    var dx = end.X - p.X;
+                    var dy = end.Y - p.Y;
+                    var score = Math.Sqrt(dx * dx + dy * dy);
+                    if (score < bestScore)
+                    {
+                        bestScore = score;
+                        best = p;
+                    }
+                }
+            }
+            if (best == null) return null;
+
+            var move = VMShimmyPlanner.Heading(start, best.Value);
+            bool stepRight = false;
+            var facing = ((VMAvatar)Caller).IsPet ? move : VMShimmyPlanner.ChooseFacing(move, Caller.RadianDirection, out stepRight);
+            var a1 = trapping[0].Key;
+            var a2 = (trapping.Count > 1) ? trapping[1].Key : a1;
+            return new VMPathShimmySegment(new Point(start.X * 0x8000, start.Y * 0x8000),
+                new Point(best.Value.X * 0x8000, best.Value.Y * 0x8000), a1.ObjectID, a2.ObjectID, facing, stepRight);
+        }
+
+        private static bool EscapeClear(VMObstacleSet obstacles, HashSet<VMObstacle> allowed, Point from, Point to)
+        {
+            var dx = to.X - from.X;
+            var dy = to.Y - from.Y;
+            var steps = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(dx * dx + dy * dy)));
+            for (int i = 1; i <= steps; i++)
+            {
+                var pt = new Point(from.X + dx * i / steps, from.Y + dy * i / steps);
+                if (obstacles.AllIntersect(new VMObstacle(pt, pt)).Any(x => !allowed.Contains(x))) return false;
+            }
+            return true;
         }
 
         private bool CanShimmy()
@@ -656,9 +845,17 @@ namespace FSO.SimAntics.Engine
                 Timeout--;
                 if (Timeout <= 0)
                 {
+                    VMDiagnostics.Route(Caller, VMRouteEventType.Timeout, VMRouteFailCode.NoPath, goal: CurRoute?.Position);
                     //try again. not sure if we should reset timeout for the new route
                     SoftFail(VMRouteFailCode.NoPath, null);
-                    if (State != VMRoutingFrameState.FAILED) {
+                    if (VMFeatures.RoutingFixes)
+                    {
+                        //AttemptRoute refilled the allowance and cleared the wait for the new goal. (Previously WaitTime
+                        //stayed above 0 with Timeout at 0, so every following tick gave up another goal.)
+                        WaitTime = 0;
+                        if (State != VMRoutingFrameState.FAILED) Velocity = 0;
+                    }
+                    else if (State != VMRoutingFrameState.FAILED) {
                         Velocity = 0;
                         State = VMRoutingFrameState.WALKING;
                     }
@@ -705,6 +902,20 @@ namespace FSO.SimAntics.Engine
                             State = VMRoutingFrameState.INITIAL;
                             if (!DoRoomRoute(CurRoute))
                             {
+                                if (VMFeatures.DynamicObstacles && PortalRetries < 1)
+                                {
+                                    //no other way round: the door may only have been in use or blocked for a moment.
+                                    //wait a little and try it once more before giving up on this goal.
+                                    PortalRetries++;
+                                    IgnoredRooms.Remove(CurrentPortal);
+                                    VMDiagnostics.Route(Caller, VMRouteEventType.DoorRetry, VMRouteFailCode.NoRoomRoute,
+                                        VM.GetObjectById(CurrentPortal.ObjectID), CurRoute?.Position);
+                                    if (DoRoomRoute(CurRoute))
+                                    {
+                                        WaitTime = 60;
+                                        return VMPrimitiveExitCode.CONTINUE;
+                                    }
+                                }
                                 SoftFail(VMRouteFailCode.NoRoomRoute, null); //todo: reattempt room route with portal we tried removed.
                                 return VMPrimitiveExitCode.CONTINUE;
                             }
@@ -734,6 +945,11 @@ namespace FSO.SimAntics.Engine
                         var parser = new VMSlotParser(Slot);
 
                         Choices = parser.FindAvaliableLocations(Target, VM.Context, avatar);
+                        TargetPos = Target.Position;
+                        TargetPosKnown = true;
+                        if (VMFeatures.Diagnostics)
+                            VMDiagnostics.Route(Caller, VMRouteEventType.Choices, parser.FailCode, parser.Blocker, Target.Position,
+                                Choices.Count + " position(s); " + parser.DescribeRejections());
                         if (Choices.Count == 0)
                         {
                             HardFail(parser.FailCode, parser.Blocker);
@@ -954,6 +1170,8 @@ namespace FSO.SimAntics.Engine
                         CurrentPath.ResetToFrame(MoveFrames);
                         bool routeAround = true;
                         VMRoutingFrame colRoute = null;
+                        VMDiagnostics.Route(Caller, VMRouteEventType.Collision, VMRouteFailCode.Success, result.Object, CurRoute?.Position,
+                            result.Status.ToString() + ", " + Retries + " retries left");
 
                         if (result.Object != null && result.Object is VMAvatar)
                         {
@@ -963,7 +1181,7 @@ namespace FSO.SimAntics.Engine
                             //we already attempted to move around this avatar... if this happens too much give up.
                             if (AvatarsToConsider.Contains(colAvatar) && --Retries <= 0)
                             {
-                                SoftFail(VMRouteFailCode.NoPath, avatar);
+                                SoftFail(VMRouteFailCode.NoPath, VMFeatures.RoutingFixes ? colAvatar : avatar);
                                 return VMPrimitiveExitCode.CONTINUE;
                             }
                             bool jobLot = VM.GetGlobalValue(11) > -1;
@@ -994,7 +1212,7 @@ namespace FSO.SimAntics.Engine
                             //todo: is this safe for the robot lot?
                             if (--Retries <= 0)
                             {
-                                SoftFail(VMRouteFailCode.NoPath, avatar);
+                                SoftFail(VMRouteFailCode.NoPath, VMFeatures.RoutingFixes ? result.Object : avatar);
                                 return VMPrimitiveExitCode.CONTINUE;
                             }
                         }
@@ -1107,6 +1325,41 @@ namespace FSO.SimAntics.Engine
 
                     if (MoveTotalFrames == MoveFrames)
                     {
+                        if (VMFeatures.Conversations && shimmySegment == null && TargetMovedAway())
+                        {
+                            //walking up to a Sim who has since walked off: choose positions around where they are now.
+                            Retargets++;
+                            VMDiagnostics.Route(Caller, VMRouteEventType.Retarget, other: Target, goal: Target.Position,
+                                detail: "target moved away (" + Retargets + " of " + MAX_RETARGETS + ")");
+                            Choices = null;
+                            var retarget = AttemptRoute(null);
+                            if (retarget != VMRouteFailCode.Success)
+                            {
+                                HardFail(retarget, Target);
+                                return VMPrimitiveExitCode.CONTINUE;
+                            }
+                            Velocity = 0;
+                            State = VMRoutingFrameState.INITIAL;
+                            return VMPrimitiveExitCode.CONTINUE;
+                        }
+                        if (VMFeatures.DynamicObstacles && WalkTo.Count > 0 && shimmySegment == null && RoomChangedSincePlan())
+                        {
+                            //an object was placed, moved or removed in this room since we planned: plan the rest again.
+                            var oldWalk = WalkTo;
+                            var oldPath = CurrentPath;
+                            var oldState = State;
+                            if (AttemptWalk())
+                            {
+                                VMDiagnostics.Route(Caller, VMRouteEventType.Replan, goal: CurRoute?.Position, detail: "room objects changed");
+                                if (State == VMRoutingFrameState.TURN_ONLY || WalkTo == null) return VMPrimitiveExitCode.CONTINUE;
+                                return VMPrimitiveExitCode.CONTINUE_NEXT_TICK;
+                            }
+                            //keep walking the old route; the collision handling deals with whatever is now in the way.
+                            WalkTo = oldWalk;
+                            CurrentPath = oldPath;
+                            State = oldState;
+                            PlannedObjectVersion = VM.Context.RoomObjectVersion[PlannedRoom];
+                        }
                         MoveTotalFrames = 0;
                         while (MoveTotalFrames == 0)
                         {
@@ -1130,6 +1383,12 @@ namespace FSO.SimAntics.Engine
         private void PreExit()
         {
             //about to exit the routing frame
+            if (State != VMRoutingFrameState.FAILED)
+            {
+                VMDiagnostics.Route(Caller, VMRouteEventType.Arrived, goal: CurRoute?.Position);
+                //a failed route sets RouteResult; without this a later successful route still reported the old failure.
+                if (VMFeatures.RoutingFixes && ParentRoute == null) ((VMAvatar)Caller).SetPersonData(VMPersonDataVariable.RouteResult, 0);
+            }
             if (DEBUG_DRAW && VM.UseWorld) DebugRemove();
             if (ParentRoute == null)
             {
@@ -1158,8 +1417,72 @@ namespace FSO.SimAntics.Engine
             if (LastWalkStyle != -1) WalkStyle = LastWalkStyle;
         }
 
+        //VMFeatures.Conversations: re-targeting a Sim that walked away. Not saved; after loading, the target's position
+        //is taken again at the next waypoint.
+        private LotTilePos TargetPos;
+        private bool TargetPosKnown;
+        private int Retargets;
+        private const int MAX_RETARGETS = 3;
+        private const int RETARGET_DISTANCE = 24;
+
+        /// <summary>
+        /// True if this route walks up to an avatar that has moved more than 1.5 tiles (or changed floors) since its
+        /// positions were chosen. (VMFeatures.Conversations)
+        /// </summary>
+        private bool TargetMovedAway()
+        {
+            if (Slot == null || ParentRoute != null || Retargets >= MAX_RETARGETS) return false;
+            var target = Target as VMAvatar;
+            if (target == null || target.Dead || target == Caller || target.Position == LotTilePos.OUT_OF_WORLD) return false;
+            if (!TargetPosKnown)
+            {
+                TargetPos = target.Position;
+                TargetPosKnown = true;
+                return false;
+            }
+            if (target.Position.Level != TargetPos.Level) return true;
+            var dx = target.Position.x - TargetPos.x;
+            var dy = target.Position.y - TargetPos.y;
+            return dx * dx + dy * dy > RETARGET_DISTANCE * RETARGET_DISTANCE;
+        }
+
+        /// <summary>
+        /// True if the avatar is in a social interaction: one of its active actions targets another avatar, or another
+        /// avatar's active action targets it. (VMFeatures.Conversations)
+        /// </summary>
+        private bool IsSocialising(VMAvatar other)
+        {
+            var thread = other.Thread;
+            if (thread == null) return false;
+            for (int i = 0; i <= thread.ActiveQueueBlock && i < thread.Queue.Count; i++)
+            {
+                var callee = thread.Queue[i].Callee;
+                if (callee is VMAvatar && callee != other) return true;
+            }
+            foreach (var ava in VM.Context.ObjectQueries.Avatars)
+            {
+                if (ava == other || ava.Thread == null) continue;
+                var queue = ava.Thread.Queue;
+                for (int i = 0; i <= ava.Thread.ActiveQueueBlock && i < queue.Count; i++)
+                {
+                    if (queue[i].Callee == other) return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>True if the action this Sim is running was queued by the player (not free will).</summary>
+        private bool RunningPlayerAction()
+        {
+            return Thread.ActiveQueueBlock >= 0 && Thread.Queue.Count > 0 && Thread.Queue[0].Priority > (short)VMQueuePriority.Autonomous;
+        }
+
         private bool CanShooAvatar(VMAvatar avatar)
         {
+            //free will walks wait for socialising Sims instead of breaking up their conversation. The player's own
+            //commands still shoo, as before.
+            if (VMFeatures.Conversations && !RunningPlayerAction() && IsSocialising(avatar)) return false;
+
             VMRoutingFrame topRoute = null;
             //look for top frame
             for (int i = avatar.Thread.Stack.Count - 1; i >= 0; i--)
@@ -1168,6 +1491,8 @@ namespace FSO.SimAntics.Engine
                 if (frame is VMRoutingFrame)
                 {
                     topRoute = (VMRoutingFrame)frame;
+                    //the comments below mean the top routing frame; without the break this found the bottom one.
+                    if (VMFeatures.RoutingFixes) break;
                 }
             }
 
@@ -1189,6 +1514,7 @@ namespace FSO.SimAntics.Engine
             if (State == VMRoutingFrameState.WALKING)
             {
                 //only wait if we're walking
+                if (WaitTime == 0) VMDiagnostics.Route(Caller, VMRouteEventType.Wait, goal: CurRoute?.Position, detail: waitTime + " ticks");
                 WaitTime = Math.Max(waitTime, WaitTime);
             }
         }

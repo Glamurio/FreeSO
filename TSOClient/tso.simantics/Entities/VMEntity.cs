@@ -56,6 +56,10 @@ namespace FSO.SimAntics
 
         public VMRuntimeHeadline Headline;
         public VMHeadlineRenderer HeadlineRenderer; //IS NOT serialized, but rather regenerated on deserialize.
+        /// <summary>Recent route and action-queue events (Simitone diagnostics). Not serialized.</summary>
+        public Diagnostics.VMEntityDiagnostics Diagnostics;
+        /// <summary>Objects this avatar recently failed to route to (Simitone object selection and free will). Not serialized.</summary>
+        public Engine.Routing.VMRouteFailMemory RouteFailMemory;
 
         public GameObject Object;
         public VMThread Thread;

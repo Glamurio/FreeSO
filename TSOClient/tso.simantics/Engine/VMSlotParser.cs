@@ -28,6 +28,118 @@ namespace FSO.SimAntics.Engine
             VMRouteFailCode.DestTileOccupied,
         };
 
+        //WallInWay was missing above, so SetFail could never report it (its index was -1). (VMFeatures.RoutingFixes)
+        private static VMRouteFailCode[] FailPrioFixed = {
+            VMRouteFailCode.NoValidGoals,
+            VMRouteFailCode.WallInWay,
+            VMRouteFailCode.NoChair,
+            VMRouteFailCode.DestTileOccupiedPerson,
+            VMRouteFailCode.DestTileOccupied,
+        };
+
+        private static int FailPriority(VMRouteFailCode code)
+        {
+            //an occupied chair is the most specific reason a sitting slot can give. (VMFeatures.ApproachPositions)
+            if (code == VMRouteFailCode.DestChairOccupied) return 100;
+            return Array.IndexOf(VMFeatures.RoutingFixes ? FailPrioFixed : FailPrio, code);
+        }
+
+        /// <summary>
+        /// How many candidate positions were left out or tried last, by reason. Only kept while VMFeatures.Diagnostics
+        /// is on; shown in the route log.
+        /// </summary>
+        public Dictionary<string, int> Rejections;
+
+        private void Reject(string reason)
+        {
+            if (!VMFeatures.Diagnostics) return;
+            if (Rejections == null) Rejections = new Dictionary<string, int>();
+            int count;
+            Rejections.TryGetValue(reason, out count);
+            Rejections[reason] = count + 1;
+        }
+
+        public string DescribeRejections()
+        {
+            if (Rejections == null || Rejections.Count == 0) return "none left out";
+            return string.Join(", ", Rejections.Select(x => x.Key + " x" + x.Value));
+        }
+
+        /// <summary>
+        /// A chair (or other seat) another avatar is sitting in. Seats hold their sitter in slot 0 ("be contained");
+        /// TS1 seat BHAVs (e.g. DiningChairs 4099) refuse to seat a second Sim, which used to surface only after the
+        /// walk, as CantSit.
+        /// </summary>
+        public static bool SeatTaken(VMEntity chair, VMEntity caller)
+        {
+            var occupant = chair.GetSlot(0);
+            return occupant != null && occupant != caller && occupant is VMAvatar;
+        }
+
+        public enum Recheck
+        {
+            Valid,
+            /// <summary>Still usable, but a Sim stands there, is heading there, or a door is there: try it last.</summary>
+            Later,
+            /// <summary>An object or a sitting Sim now takes it.</summary>
+            Drop
+        }
+
+        /// <summary>
+        /// Checks a destination chosen earlier against the current state of the lot, with the same tests as
+        /// VerifyAndAddLocation (VMFeatures.ApproachPositions). Positions of slots that snap into a target slot are not
+        /// verified at parse time either, so they are always valid here.
+        /// </summary>
+        public static Recheck RecheckLocation(VMFindLocationResult loc, SLOTItem slot, VMEntity caller, VMContext context)
+        {
+            if (slot != null && slot.SnapTargetSlot >= 0) return Recheck.Valid;
+            if (loc.Chair != null)
+            {
+                if (loc.Chair.Dead || SeatTaken(loc.Chair, caller)) return Recheck.Drop;
+                return Recheck.Valid;
+            }
+
+            var solid = caller.PositionValid(loc.Position, Direction.NORTH, context, VMPlaceRequestFlags.AcceptSlots | VMPlaceRequestFlags.AllAvatarsSolid);
+            if (solid.Status != Model.VMPlacementError.Success && solid.Object != null)
+            {
+                if (solid.Object is VMGameObject) return Recheck.Drop;
+                return Recheck.Later;
+            }
+            if (context.ObjectQueries.GetObjectsAt(loc.Position)?.Any(
+                x => ((VMEntityFlags2)x.GetValue(VMStackObjectVariable.FlagField2) & VMEntityFlags2.ArchitectualDoor) > 0) ?? false)
+                return Recheck.Later;
+            foreach (var avatar in context.ObjectQueries.Avatars)
+            {
+                if (avatar == caller || avatar.Thread == null) continue;
+                if (avatar.Thread.Stack.Any(x => x is VMRoutingFrame && ((VMRoutingFrame)x).IntersectsOurDestination(loc))) return Recheck.Later;
+            }
+            return Recheck.Valid;
+        }
+
+        /// <summary>
+        /// Rechecks the remaining destinations in place: drops the ones that are taken now and moves the ones that would
+        /// need a shoo behind the others, keeping their order otherwise. Returns how many were dropped.
+        /// </summary>
+        public static int RecheckLocations(List<VMFindLocationResult> locations, SLOTItem slot, VMEntity caller, VMContext context)
+        {
+            var now = new List<VMFindLocationResult>();
+            var later = new List<VMFindLocationResult>();
+            int dropped = 0;
+            foreach (var loc in locations)
+            {
+                switch (RecheckLocation(loc, slot, caller, context))
+                {
+                    case Recheck.Valid: now.Add(loc); break;
+                    case Recheck.Later: later.Add(loc); break;
+                    default: dropped++; break;
+                }
+            }
+            locations.Clear();
+            locations.AddRange(now);
+            locations.AddRange(later);
+            return dropped;
+        }
+
         private SLOTFlags Flags;
         private int MinProximity;
         private int MaxProximity;
@@ -144,7 +256,8 @@ namespace FSO.SimAntics.Engine
                 SLOTEnumerationFunction((x, y, distance) =>
                 {
                     var pos = new Vector2(circleCtr.X + x / 16.0f, circleCtr.Y + y / 16.0f);
-                    if (distance >= MinProximity - 0.5 && distance <= MaxProximity + 0.5 && (ignoreRooms || context.VM.Context.GetRoomAt(new LotTilePos((short)Math.Round(pos.X * 16), (short)Math.Round(pos.Y * 16), obj.Position.Level)) == room)) //slot is within proximity
+                    var inRange = distance >= MinProximity - 0.5 && distance <= MaxProximity + 0.5;
+                    if (inRange && (ignoreRooms || context.VM.Context.GetRoomAt(new LotTilePos((short)Math.Round(pos.X * 16), (short)Math.Round(pos.Y * 16), obj.Position.Level)) == room)) //slot is within proximity
                     {
                         var routeEntryFlags = (GetSearchDirection(circleCtr, pos, dir) & Flags); //the route needs to know what conditions it fulfilled
                         if (routeEntryFlags > 0) //within search location
@@ -165,6 +278,7 @@ namespace FSO.SimAntics.Engine
                             VerifyAndAddLocation(obj, pos, center, routeEntryFlags, baseScore, context, caller, float.NaN, level);
                         }
                     }
+                    else if (inRange) Reject("other room");
                 });
             }
             /** Sort by how close they are to desired proximity **/
@@ -209,7 +323,11 @@ namespace FSO.SimAntics.Engine
             //note: verification is not performed if snap target slot is enabled.
             var tpos = new LotTilePos((short)Math.Round(pos.X * 16), (short)Math.Round(pos.Y * 16), level);
 
-            if (context.IsOutOfBounds(tpos)) return;
+            if (context.IsOutOfBounds(tpos))
+            {
+                Reject("off the lot");
+                return;
+            }
 
             if ((Flags & SLOTFlags.RandomScoring) == 0)
             {
@@ -219,6 +337,7 @@ namespace FSO.SimAntics.Engine
             if (Slot.SnapTargetSlot < 0 && context.Architecture.RaycastWall(new Point((int)pos.X, (int)pos.Y), new Point(obj.Position.TileX, obj.Position.TileY), level))
             {
                 SetFail(VMRouteFailCode.WallInWay, null);
+                Reject("wall in the way");
                 return;
             } 
 
@@ -278,6 +397,7 @@ namespace FSO.SimAntics.Engine
                             else
                             {
                                 SetFail(VMRouteFailCode.DestTileOccupied, solid.Object);
+                                Reject("object in the way");
                                 return;
                             }
                         } else
@@ -292,8 +412,21 @@ namespace FSO.SimAntics.Engine
                     avatarInWay = true; //prefer not standing in front of a door. (todo: merge with above check?)
 
                 if (result.Chair != null && (Math.Abs(DirectionUtils.Difference(result.Chair.RadianDirection, facingDir)) > Math.PI / 4))
+                {
+                    Reject("seat faces the wrong way");
                     return; //not a valid goal.
-                if (result.Chair == null && OnlySit) return;
+                }
+                if (result.Chair == null && OnlySit)
+                {
+                    Reject("no seat");
+                    return;
+                }
+                if (result.Chair != null && VMFeatures.ApproachPositions && SeatTaken(result.Chair, caller))
+                {
+                    SetFail(VMRouteFailCode.DestChairOccupied, result.Chair.GetSlot(0));
+                    Reject("seat taken");
+                    return;
+                }
 
                 score = score * ((result.Chair != null) ? Slot.Sitting : Slot.Standing);
                 //if an avatar is in or going to our destination positon, we this spot becomes low priority as getting into it will require a shoo.
@@ -309,12 +442,17 @@ namespace FSO.SimAntics.Engine
                             if (intersects)
                             {
                                 score = score / 100000;
+                                Reject("another Sim's destination (tried last)");
                                 break;
                             }
                         }
                     }
                 }
-                else score = score / 100000;
+                else
+                {
+                    score = score / 100000;
+                    Reject("Sim or door there (tried last)");
+                }
             }
             result.Score = score;
 
@@ -323,7 +461,7 @@ namespace FSO.SimAntics.Engine
 
         private void SetFail(VMRouteFailCode code, VMEntity blocker)
         {
-            if (Array.IndexOf(FailPrio, code) > Array.IndexOf(FailPrio, FailCode))
+            if (FailPriority(code) > FailPriority(FailCode))
             {
                 FailCode = code;
                 Blocker = blocker;

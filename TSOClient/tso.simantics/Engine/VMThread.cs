@@ -3,6 +3,7 @@
     #define IDE_COMPAT
 #endif
 
+using FSO.SimAntics.Diagnostics;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -214,6 +215,11 @@ namespace FSO.SimAntics.Engine
                 }
                 else
                 {
+                    if (!IsCheck)
+                    {
+                        var skipped = item.Mode == VMQueueMode.ParentIdle && Entity.GetFlag(VMEntityFlags.InteractionCanceled);
+                        VMDiagnostics.ActionEnded(Entity, item, skipped ? VMActionEndReason.QueueSkipped : VMActionEndReason.CheckFailedAtStart);
+                    }
                     Queue.RemoveAt(ActiveQueueBlock + 1); //keep going.
                 }
             }
@@ -248,10 +254,37 @@ namespace FSO.SimAntics.Engine
             }
         }
 
-        private void EndCurrentInteraction()
+        /// <summary>
+        /// The running action's object was deleted (VMFeatures.QueueRecovery). The entity is still reset, as before, to
+        /// clear the stack the action left behind, but the actions queued after it are put back: the player's queue used
+        /// to be wiped by one deleted object (a visitor leaving, a plate cleared away, an object sold).
+        /// Sub-actions of the deleted action (other active items, "parent idle/exit" items) and actions on other deleted
+        /// objects are dropped with it.
+        /// </summary>
+        private void ResetKeepingQueue()
+        {
+            var keep = new List<VMQueuedAction>();
+            for (int i = 0; i < Queue.Count; i++)
+            {
+                var item = Queue[i];
+                if (i == 0) VMDiagnostics.ActionEnded(Entity, item, VMActionEndReason.CalleeDeleted);
+                else if (i <= ActiveQueueBlock || item.Mode != VMQueueMode.Normal || item.Callee == null || item.Callee.Dead)
+                    VMDiagnostics.ActionEnded(Entity, item, VMActionEndReason.Pruned);
+                else keep.Add(item);
+            }
+            Entity.Reset(Context);
+            if (keep.Count > 0)
+            {
+                Queue.AddRange(keep);
+                QueueDirty = true;
+            }
+        }
+
+        private void EndCurrentInteraction(VMActionEndReason reason)
         {
             QueueDirty = true;
             var interaction = Queue[ActiveQueueBlock];
+            if (!IsCheck) VMDiagnostics.ActionEnded(Entity, interaction, reason);
             //clear "interaction cancelled" since we are leaving the interaction
             if (interaction.Mode != VMQueueMode.ParentIdle) Entity.SetFlag(VMEntityFlags.InteractionCanceled, false);
             if (interaction.Callback != null) interaction.Callback.Run(Entity);
@@ -281,7 +314,7 @@ namespace FSO.SimAntics.Engine
                 {
                     Stack.RemoveAt(Stack.Count-1);
                 }
-                EndCurrentInteraction();
+                EndCurrentInteraction(VMActionEndReason.Cancelled);
             }
         }
 
@@ -351,7 +384,16 @@ namespace FSO.SimAntics.Engine
                     }
                     else //interaction owner is dead, rip
                     {
-                        Entity.Reset(Context);
+                        if (VMFeatures.QueueRecovery && !IsCheck) ResetKeepingQueue();
+                        else
+                        {
+                            if (!IsCheck)
+                            {
+                                for (int i = 0; i < Queue.Count; i++)
+                                    VMDiagnostics.ActionEnded(Entity, Queue[i], (i == 0) ? VMActionEndReason.CalleeDeleted : VMActionEndReason.OwnerDeadReset);
+                            }
+                            Entity.Reset(Context);
+                        }
                     }
                 }
 
@@ -391,6 +433,8 @@ namespace FSO.SimAntics.Engine
 
                 if (!IsCheck)
                 {
+                    if (context.Caller == Entity)
+                        foreach (var item in Queue) VMDiagnostics.ActionEnded(Entity, item, VMActionEndReason.Exception);
                     context.Callee.Reset(context.VM.Context);
                     context.Caller.Reset(context.VM.Context);
                     if (Delete) Entity.Delete(true, context.VM.Context);
@@ -425,6 +469,7 @@ namespace FSO.SimAntics.Engine
             {
                 if (Queue[i].Callee == null || Queue[i].Callee.Dead)
                 {
+                    if (!IsCheck) VMDiagnostics.ActionEnded(Entity, Queue[i], VMActionEndReason.CalleeDeleted);
                     Queue.RemoveAt(i--); //remove interactions to dead objects (not within active queue block)
                     continue;
                 }
@@ -634,7 +679,11 @@ namespace FSO.SimAntics.Engine
                 case VMPrimitiveExitCode.INTERRUPT:
                     Stack.Clear();
                     QueueDirty = true;
-                    if (Queue.Count > 0) Queue.RemoveAt(0);
+                    if (Queue.Count > 0)
+                    {
+                        if (!IsCheck) VMDiagnostics.ActionEnded(Entity, Queue[0], VMActionEndReason.Interrupted);
+                        Queue.RemoveAt(0);
+                    }
                     LastStackExitCode = result;
                     break;
             }
@@ -712,7 +761,10 @@ namespace FSO.SimAntics.Engine
             if (discardResult == VMSpecialResult.Interaction) //interaction switching back to main (it cannot be the other way...)
             {
                 var interaction = Queue[ActiveQueueBlock];
-                EndCurrentInteraction();
+                VMActionEndReason reason;
+                if (Entity.GetFlag(VMEntityFlags.InteractionCanceled) && interaction.Mode != VMQueueMode.ParentIdle) reason = VMActionEndReason.Cancelled;
+                else reason = (result == VMPrimitiveExitCode.RETURN_FALSE) ? VMActionEndReason.CompletedFalse : VMActionEndReason.Completed;
+                EndCurrentInteraction(reason);
                 result = (!interaction.Flags.HasFlag(TTABFlags.RunImmediately)) ? VMPrimitiveExitCode.CONTINUE_NEXT_TICK : VMPrimitiveExitCode.CONTINUE;
             }
             else if (discardResult == VMSpecialResult.Retry)
@@ -808,7 +860,11 @@ namespace FSO.SimAntics.Engine
                             i += 2;
                             while (i < this.Queue.Count)
                             {
-                                CancelAction(this.Queue[i].UID);
+                                var item = this.Queue[i];
+                                CancelAction(item.UID);
+                                //CancelAction does not remove items it can only flag (ParentIdle/ParentExit modes, or
+                                //"must run"), which made this loop forever. Step over them. (VMFeatures.QueueFixes)
+                                if (VMFeatures.QueueFixes && i < this.Queue.Count && this.Queue[i] == item) i++;
                             }
                         }
                         EvaluateQueuePriorities();
@@ -838,7 +894,11 @@ namespace FSO.SimAntics.Engine
                     {
                         if (Queue[i].Mode == Engine.VMQueueMode.ParentIdle)
                         {
-                            if (interaction.Mode == Engine.VMQueueMode.ParentIdle) Queue.RemoveAt(i--);
+                            if (interaction.Mode == Engine.VMQueueMode.ParentIdle)
+                            {
+                                VMDiagnostics.ActionEnded(Entity, Queue[i], VMActionEndReason.QueueSkipped);
+                                Queue.RemoveAt(i--);
+                            }
                             else
                             {
                                 Queue[i].NotifyIdle = true;
@@ -854,10 +914,12 @@ namespace FSO.SimAntics.Engine
                     }
                 }
 
-                var canQueueSkip = !interaction.Flags.HasFlag(TTABFlags.MustRun);
+                //TS1's "allow dogs" TTAB flag uses the same bit as TSO's MustRun. (VMFeatures.QueueFixes)
+                var canQueueSkip = (VMFeatures.QueueFixes && Context.VM.TS1) || !interaction.Flags.HasFlag(TTABFlags.MustRun);
 
                 if (canQueueSkip && (index > ActiveQueueBlock || Stack.LastOrDefault()?.ActionTree == false) && (interaction.Mode == Engine.VMQueueMode.Normal || interaction.Flags.HasFlag(TTABFlags.FSODirectControl)))
                 {
+                    VMDiagnostics.ActionEnded(Entity, interaction, VMActionEndReason.QueueSkipped);
                     Queue.Remove(interaction);
                     if (Context.VM.TS1) interaction.Callee.ExecuteEntryPoint(4, Context, true, Entity); //queue skipped
                 }

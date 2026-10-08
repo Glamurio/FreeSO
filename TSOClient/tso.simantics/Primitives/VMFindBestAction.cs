@@ -6,6 +6,7 @@ using FSO.Files.Utils;
 using FSO.SimAntics.Model;
 using FSO.Files.Formats.IFF.Chunks;
 using FSO.LotView.Model;
+using FSO.SimAntics.Engine.Routing;
 
 namespace FSO.SimAntics.Primitives
 {
@@ -129,6 +130,10 @@ namespace FSO.SimAntics.Primitives
 
             float baseHappy = happyParts.Sum();
 
+            //VMFeatures.AutonomyFixes: objects the Sim can't reach, or just failed to route to, score much lower.
+            var autonomyFixes = VMFeatures.AutonomyFixes;
+            var reachable = autonomyFixes ? VMReachability.RoomsReachableBy(caller, context.VM.Context) : null;
+
             List<VMPieMenuInteraction> validActions = new List<VMPieMenuInteraction>();
             foreach (var iobj in ents)
             {
@@ -152,6 +157,16 @@ namespace FSO.SimAntics.Primitives
                 var inUse = obj.GetFlag(VMEntityFlags.Occupied);
 
                 if (obj.TreeTable == null) continue;
+
+                float objFactor = 1;
+                if (autonomyFixes)
+                {
+                    //the lockout count is set by the standard exit tree after an object is used, and decays over time.
+                    //find best object for function already skips locked out objects; free will ignored it.
+                    if (obj != caller && obj.GetValue(VMStackObjectVariable.LockoutCount) > 0) continue;
+                    if (!VMReachability.CanReach(reachable, obj, context.VM.Context)) objFactor = UNREACHABLE_FACTOR;
+                    else if (VMRouteFailMemory.RecentlyFailed(caller, obj)) objFactor = RECENT_FAILURE_FACTOR;
+                }
                 foreach (var entry in obj.TreeTable.AutoInteractions)
                 {
                     var id = entry.TTAIndex;
@@ -257,6 +272,7 @@ namespace FSO.SimAntics.Primitives
                             entry.AttenuationValue : attenTable[entry.AttenuationCode];
 
                         score = score / (1 + atten * distance);
+                        score *= objFactor;
 
                         if (score > minScore)
                         {
@@ -264,8 +280,11 @@ namespace FSO.SimAntics.Primitives
                             {
                                 item.Score = score;
                                 item.Callee = obj;
-                                validActions.Add(first);
+                                if (!VMFeatures.AutonomyCountOnce) validActions.Add(first);
                             }
+                            //VMFeatures.AutonomyCountOnce: the action counts once, as its first entry (the one the score
+                            //was computed for). The loop above added the first entry once per entry, multiplying its odds.
+                            if (VMFeatures.AutonomyCountOnce) validActions.Add(first);
                         }
                     }
                     //if (attenScore != 0) attenScore += (int)context.VM.Context.NextRandom(31) - 15;
@@ -311,6 +330,11 @@ namespace FSO.SimAntics.Primitives
             }
             
         }
+
+        /// <summary>Score multiplier for objects in rooms the Sim can't reach through doors and stairs.</summary>
+        public const float UNREACHABLE_FACTOR = 0.01f;
+        /// <summary>Score multiplier for objects the Sim failed to route to within the last Sim hour.</summary>
+        public const float RECENT_FAILURE_FACTOR = 0.1f;
 
         private List<VMPieMenuInteraction> TakeTopActions(List<VMPieMenuInteraction> list, int count)
         {
