@@ -1,0 +1,208 @@
+From 6a144b27becc822d11f4748b61b47a6b6b1a9d44 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 8 Oct 2026 18:03:58 +0200
+Subject: [PATCH 2/3] Routing: per-goal budgets, timeout and SoftFail fixes;
+ queue cancel fixes
+
+Behind VMFeatures.RoutingFixes (default on):
+- AttemptRoute refills Timeout and Retries and clears WaitTime for each
+  goal. They were set once per routing frame, so after one long wait
+  every later goal started with an empty allowance.
+- The wait-timeout branch clears WaitTime after giving up a goal. It
+  used to leave WaitTime > 0 with Timeout <= 0, so each following tick
+  gave up the next goal and the whole route failed within a few ticks.
+- SoftFail moves to the INITIAL state for the next goal, so portals,
+  chairs and standing up are handled. Staying in WALKING made the Sim
+  walk straight at the next goal's position.
+- VMSlotParser can report WallInWay (it was missing from the fail
+  priority list); collision give-ups blame the avatar or object in the
+  way instead of the routing Sim; RouteResult is cleared on success.
+
+Behind VMFeatures.QueueFixes (default on):
+- TS1 interactions flagged "allow dogs" (same bit as TSO's MustRun) can
+  be cancelled while queued; cancelling one used to cancel the running
+  action instead.
+- TS1 queue skipping after inserting a higher priority action no longer
+  loops forever when an item can't be removed (ParentIdle/ParentExit).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019q6m8f542cVUMKg755aFtZ
+---
+ .../tso.simantics/Engine/VMRoutingFrame.cs    | 34 ++++++++++++++++---
+ .../tso.simantics/Engine/VMSlotParser.cs      | 16 ++++++++-
+ TSOClient/tso.simantics/Engine/VMThread.cs    |  9 +++--
+ TSOClient/tso.simantics/VMFeatures.cs         | 18 ++++++++++
+ 4 files changed, 70 insertions(+), 7 deletions(-)
+
+diff --git a/TSOClient/tso.simantics/Engine/VMRoutingFrame.cs b/TSOClient/tso.simantics/Engine/VMRoutingFrame.cs
+index b2a14f6a6..bb4dac64c 100644
+--- a/TSOClient/tso.simantics/Engine/VMRoutingFrame.cs
++++ b/TSOClient/tso.simantics/Engine/VMRoutingFrame.cs
+@@ -206,6 +206,12 @@ namespace FSO.SimAntics.Engine
+             }
+ 
+             if (found != VMRouteFailCode.Success) HardFail(code, blocker);
++            else if (VMFeatures.RoutingFixes && State != VMRoutingFrameState.INITIAL)
++            {
++                //the next goal may be in another room or be a chair: run it through the INITIAL state (portals, sit,
++                //stand up) rather than continuing to walk, which would head straight for its position.
++                State = VMRoutingFrameState.INITIAL;
++            }
+         }
+ 
+         private void HardFail(VMRouteFailCode code, VMEntity blocker)
+@@ -324,6 +330,14 @@ namespace FSO.SimAntics.Engine
+             WalkTo = null; //reset routing state
+             AttemptedChair = false;
+             TurnTweak = 0;
++            if (VMFeatures.RoutingFixes)
++            {
++                //each goal gets its own allowance (the field comments always said so, but nothing refilled them),
++                //and must not inherit a wait from the goal that was given up.
++                Timeout = WAIT_TIMEOUT;
++                Retries = MAX_RETRIES;
++                WaitTime = 0;
++            }
+ 
+             VMDiagnostics.Route(Caller, VMRouteEventType.Goal, goal: route?.Position ?? Target?.Position, other: route?.Chair);
+             var roomRoute = DoRoomRoute(route);
+@@ -668,7 +682,14 @@ namespace FSO.SimAntics.Engine
+                     VMDiagnostics.Route(Caller, VMRouteEventType.Timeout, VMRouteFailCode.NoPath, goal: CurRoute?.Position);
+                     //try again. not sure if we should reset timeout for the new route
+                     SoftFail(VMRouteFailCode.NoPath, null);
+-                    if (State != VMRoutingFrameState.FAILED) {
++                    if (VMFeatures.RoutingFixes)
++                    {
++                        //AttemptRoute refilled the allowance and cleared the wait for the new goal. (Previously WaitTime
++                        //stayed above 0 with Timeout at 0, so every following tick gave up another goal.)
++                        WaitTime = 0;
++                        if (State != VMRoutingFrameState.FAILED) Velocity = 0;
++                    }
++                    else if (State != VMRoutingFrameState.FAILED) {
+                         Velocity = 0;
+                         State = VMRoutingFrameState.WALKING;
+                     }
+@@ -975,7 +996,7 @@ namespace FSO.SimAntics.Engine
+                             //we already attempted to move around this avatar... if this happens too much give up.
+                             if (AvatarsToConsider.Contains(colAvatar) && --Retries <= 0)
+                             {
+-                                SoftFail(VMRouteFailCode.NoPath, avatar);
++                                SoftFail(VMRouteFailCode.NoPath, VMFeatures.RoutingFixes ? colAvatar : avatar);
+                                 return VMPrimitiveExitCode.CONTINUE;
+                             }
+                             bool jobLot = VM.GetGlobalValue(11) > -1;
+@@ -1006,7 +1027,7 @@ namespace FSO.SimAntics.Engine
+                             //todo: is this safe for the robot lot?
+                             if (--Retries <= 0)
+                             {
+-                                SoftFail(VMRouteFailCode.NoPath, avatar);
++                                SoftFail(VMRouteFailCode.NoPath, VMFeatures.RoutingFixes ? result.Object : avatar);
+                                 return VMPrimitiveExitCode.CONTINUE;
+                             }
+                         }
+@@ -1142,7 +1163,12 @@ namespace FSO.SimAntics.Engine
+         private void PreExit()
+         {
+             //about to exit the routing frame
+-            if (State != VMRoutingFrameState.FAILED) VMDiagnostics.Route(Caller, VMRouteEventType.Arrived, goal: CurRoute?.Position);
++            if (State != VMRoutingFrameState.FAILED)
++            {
++                VMDiagnostics.Route(Caller, VMRouteEventType.Arrived, goal: CurRoute?.Position);
++                //a failed route sets RouteResult; without this a later successful route still reported the old failure.
++                if (VMFeatures.RoutingFixes && ParentRoute == null) ((VMAvatar)Caller).SetPersonData(VMPersonDataVariable.RouteResult, 0);
++            }
+             if (DEBUG_DRAW && VM.UseWorld) DebugRemove();
+             if (ParentRoute == null)
+             {
+diff --git a/TSOClient/tso.simantics/Engine/VMSlotParser.cs b/TSOClient/tso.simantics/Engine/VMSlotParser.cs
+index 49d4e23f5..612fd859e 100644
+--- a/TSOClient/tso.simantics/Engine/VMSlotParser.cs
++++ b/TSOClient/tso.simantics/Engine/VMSlotParser.cs
+@@ -28,6 +28,20 @@ namespace FSO.SimAntics.Engine
+             VMRouteFailCode.DestTileOccupied,
+         };
+ 
++        //WallInWay was missing above, so SetFail could never report it (its index was -1). (VMFeatures.RoutingFixes)
++        private static VMRouteFailCode[] FailPrioFixed = {
++            VMRouteFailCode.NoValidGoals,
++            VMRouteFailCode.WallInWay,
++            VMRouteFailCode.NoChair,
++            VMRouteFailCode.DestTileOccupiedPerson,
++            VMRouteFailCode.DestTileOccupied,
++        };
++
++        private static int FailPriority(VMRouteFailCode code)
++        {
++            return Array.IndexOf(VMFeatures.RoutingFixes ? FailPrioFixed : FailPrio, code);
++        }
++
+         private SLOTFlags Flags;
+         private int MinProximity;
+         private int MaxProximity;
+@@ -323,7 +337,7 @@ namespace FSO.SimAntics.Engine
+ 
+         private void SetFail(VMRouteFailCode code, VMEntity blocker)
+         {
+-            if (Array.IndexOf(FailPrio, code) > Array.IndexOf(FailPrio, FailCode))
++            if (FailPriority(code) > FailPriority(FailCode))
+             {
+                 FailCode = code;
+                 Blocker = blocker;
+diff --git a/TSOClient/tso.simantics/Engine/VMThread.cs b/TSOClient/tso.simantics/Engine/VMThread.cs
+index 2582a64ec..ea3b31925 100644
+--- a/TSOClient/tso.simantics/Engine/VMThread.cs
++++ b/TSOClient/tso.simantics/Engine/VMThread.cs
+@@ -830,7 +830,11 @@ namespace FSO.SimAntics.Engine
+                             i += 2;
+                             while (i < this.Queue.Count)
+                             {
+-                                CancelAction(this.Queue[i].UID);
++                                var item = this.Queue[i];
++                                CancelAction(item.UID);
++                                //CancelAction does not remove items it can only flag (ParentIdle/ParentExit modes, or
++                                //"must run"), which made this loop forever. Step over them. (VMFeatures.QueueFixes)
++                                if (VMFeatures.QueueFixes && i < this.Queue.Count && this.Queue[i] == item) i++;
+                             }
+                         }
+                         EvaluateQueuePriorities();
+@@ -880,7 +884,8 @@ namespace FSO.SimAntics.Engine
+                     }
+                 }
+ 
+-                var canQueueSkip = !interaction.Flags.HasFlag(TTABFlags.MustRun);
++                //TS1's "allow dogs" TTAB flag uses the same bit as TSO's MustRun. (VMFeatures.QueueFixes)
++                var canQueueSkip = (VMFeatures.QueueFixes && Context.VM.TS1) || !interaction.Flags.HasFlag(TTABFlags.MustRun);
+ 
+                 if (canQueueSkip && (index > ActiveQueueBlock || Stack.LastOrDefault()?.ActionTree == false) && (interaction.Mode == Engine.VMQueueMode.Normal || interaction.Flags.HasFlag(TTABFlags.FSODirectControl)))
+                 {
+diff --git a/TSOClient/tso.simantics/VMFeatures.cs b/TSOClient/tso.simantics/VMFeatures.cs
+index 6380c3d91..a036d9c1f 100644
+--- a/TSOClient/tso.simantics/VMFeatures.cs
++++ b/TSOClient/tso.simantics/VMFeatures.cs
+@@ -19,6 +19,24 @@ namespace FSO.SimAntics
+             set { VMShimmyPlanner.Enabled = value; }
+         }
+ 
++        /// <summary>
++        /// Routing bug fixes (roadmap 1a):
++        /// - the wait timeout and collision retries are given to each goal, instead of once per route request;
++        /// - a timed-out wait no longer discards every remaining goal on consecutive ticks;
++        /// - moving on to the next goal restarts goal handling (doors, chairs) instead of walking straight at it;
++        /// - "wall in the way" can be reported, and route failure blames the object actually in the way, not the Sim;
++        /// - the RouteResult person data is cleared when a route succeeds.
++        /// </summary>
++        public static bool RoutingFixes = true;
++
++        /// <summary>
++        /// Action queue bug fixes:
++        /// - TS1 interactions that allow dogs can be cancelled while queued (their TTAB flag shares a bit with TSO's
++        ///   "must run", which made cancelling them cancel the running action instead);
++        /// - queue skipping after a higher priority action no longer loops forever on items it can't remove.
++        /// </summary>
++        public static bool QueueFixes = true;
++
+         /// <summary>
+         /// Record route events and the reason every queued action ended (see Diagnostics.VMDiagnostics).
+         /// Does not change behaviour.
+-- 
+2.43.0
