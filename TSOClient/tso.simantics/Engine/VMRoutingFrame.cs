@@ -391,6 +391,10 @@ namespace FSO.SimAntics.Engine
             //portals are used to traverse floors, so we do not care about the floor each point is on.
             //when evaluating possible adjacent tiles we use the Caller's current floor.
 
+            //A walk can be requested while no goal is selected (seen in the smoke test: watering a plant, lot 56, seed 7).
+            //Report "no path" so the caller soft-fails to the next goal instead of throwing.
+            if (CurRoute == null) return false;
+
             LotTilePos startPos = Caller.Position;
             //CurrentPath = VMPathLineSegment.LoP(Caller.Position.ToPoint(), CurRoute.Position.ToPoint());
             //CurrentPath.CalculateTotalFrames();
