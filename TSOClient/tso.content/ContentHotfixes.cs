@@ -50,9 +50,12 @@ namespace FSO.Content
         /// the four tiles next to the fireplace in front of it. A fire lasts Tuning[9] * 450 = 1350 passes, so about 83% of
         /// fires ignite something, on average ~100 game minutes in, and usually the first thing next to it (a pet bed).
         /// There is no per-material flammability: only the single Burns flag (flag 6 of object data 40 = VMEntityFlags2.Burns).
-        /// The roll is divided here by raising the range, so the ignition stays possible but is much rarer.
+        /// The roll range is multiplied here, which is the same as the pass checking for ignition only once every
+        /// FireIgnitionDivisor passes: 15 passes x 4 ticks = one check per 60 ticks (2 game minutes) at the original 1 in 750
+        /// odds. A fire then ignites something about 11% of the time (about 83% originally).
         /// </summary>
-        public static int FireIgnitionDivisor = 10;
+        public const int DefaultFireIgnitionDivisor = 15;
+        public static int FireIgnitionDivisor = DefaultFireIgnitionDivisor;
         private static readonly byte[] BurnRollHead = { 0x00, 0x00, 0x19, 0x00 };
 
         public static ushort ScaleIgnitionRange(ushort range, int divisor)
