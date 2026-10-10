@@ -249,6 +249,20 @@ namespace FSO.LotView
         }
 
         /// <summary>
+        /// The season trees and shrubs are drawn in (0 spring, 1 summer, 2 autumn, 3 winter), or -1 for the sprites as they are.
+        /// Set with SetFoliageSeason so the objects redraw.
+        /// </summary>
+        public int FoliageSeason = -1;
+
+        public void SetFoliageSeason(int season)
+        {
+            if (season < 0 || season > 3) season = -1;
+            if (season == FoliageSeason) return;
+            FoliageSeason = season;
+            World?.InvalidateFoliage();
+        }
+
+        /// <summary>
         /// What zoom level is being displayed
         /// </summary>
         private WorldZoom _Zoom;

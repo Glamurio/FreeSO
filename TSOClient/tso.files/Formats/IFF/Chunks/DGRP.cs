@@ -269,6 +269,14 @@ namespace FSO.Files.Formats.IFF.Chunks
 
         #region IWorldTextureProvider Members
 
+        /// <summary>The SPR2 frame this sprite draws, or null (SPR1 sprites and missing sprites).</summary>
+        public SPR2Frame GetFrame()
+        {
+            var spr2 = Parent.ChunkParent.Get<SPR2>((ushort)this.SpriteID);
+            if (spr2 == null || this.SpriteFrameIndex >= spr2.Frames.Length) return null;
+            return spr2.Frames[this.SpriteFrameIndex];
+        }
+
         public byte[] GetDepth()
         {
             var iff = Parent.ChunkParent;

@@ -41,10 +41,26 @@ namespace FSO.LotView.Utils
         private DGRP3DMesh Mesh;
         public Matrix World;
         
+        /// <summary>Trees and shrubs get a seasonal look (see SeasonalFoliage); everything else is None.</summary>
+        public FoliageKind Foliage;
+        private FoliageLook AppliedLook;
+
         public DGRPRenderer(DGRP group, OBJD source)
         {
             this.DrawGroup = group;
             this.Source = source;
+            Foliage = SeasonalFoliage.Classify(source?.ChunkLabel);
+        }
+
+        /// <summary>Makes the next ValidateSprite rebuild the sprites if the world's season changed their look.</summary>
+        public void InvalidateSeason(WorldState world)
+        {
+            if (Foliage == FoliageKind.None) return;
+            if (SeasonalFoliage.LookFor(Foliage, world.FoliageSeason) != AppliedLook)
+            {
+                _TextureDirty = true;
+                _Dirty = ComponentRenderMode.Both;
+            }
         }
 
         /// <summary>
@@ -152,10 +168,13 @@ namespace FSO.LotView.Utils
             if (DrawGroup == null) return;
             if (_Dirty.IsSet(ComponentRenderMode._2D))
             {
+                var look = Foliage == FoliageKind.None ? FoliageLook.Normal : SeasonalFoliage.LookFor(Foliage, world.FoliageSeason);
+                if (look != AppliedLook) _TextureDirty = true;
                 if (_TextureDirty)
                 {
                     Dispose();
                     Items.Clear();
+                    AppliedLook = look;
                     var direction = (uint)_Direction;
 
                     /** Compute the direction **/
@@ -167,7 +186,8 @@ namespace FSO.LotView.Utils
                         foreach (var dgrpSprite in image.Sprites)
                         {
                             if (dgrpSprite == null) continue;
-                            var texture = world._2D.GetWorldTexture(dgrpSprite);
+                            var texture = (look != FoliageLook.Normal ? SeasonalSprites.Get(world.Device, dgrpSprite, look) : null)
+                                ?? world._2D.GetWorldTexture(dgrpSprite);
                             if (texture.Pixel == null) { continue; }
 
                             var isDynamic = dgrpSprite.SpriteID >= DynamicSpriteBaseID && dgrpSprite.SpriteID < (DynamicSpriteBaseID + NumDynamicSprites);

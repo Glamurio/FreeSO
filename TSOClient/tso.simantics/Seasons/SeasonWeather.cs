@@ -110,6 +110,24 @@ namespace FSO.SimAntics.Seasons
             return Forecast(season, SlotOf(absoluteDay, hour));
         }
 
+        /// <summary>
+        /// Debug showcase (season cycler): steps through every kind of weather the season can have, one per step (clear skies
+        /// excluded), at a strong intensity, so each effect can be looked at without waiting for the dice.
+        /// </summary>
+        public static SeasonWeatherState Showcase(Season season, int step)
+        {
+            var kinds = Kinds[(int)season];
+            int n = 0;
+            foreach (var k in kinds) if (k != SeasonWeatherKind.Clear) n++;
+            int pick = ((step % n) + n) % n;
+            foreach (var k in kinds)
+            {
+                if (k == SeasonWeatherKind.Clear) continue;
+                if (pick-- == 0) return new SeasonWeatherState { Kind = k, Intensity = 80 };
+            }
+            return new SeasonWeatherState { Kind = SeasonWeatherKind.Clear };
+        }
+
         /// <summary>Encodes a forecast as a manual weather value. Winter always has snow cover on the ground.</summary>
         public static short ToWeatherData(SeasonWeatherState state, Season season)
         {

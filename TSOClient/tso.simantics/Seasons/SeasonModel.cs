@@ -79,6 +79,23 @@ namespace FSO.SimAntics.Seasons
             return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
         }
 
+        /// <summary>The inverse of AbsoluteDay.</summary>
+        public static void FromAbsoluteDay(long absoluteDay, out int year, out int month, out int dayOfMonth)
+        {
+            long y = FloorDiv(absoluteDay, DaysPerYear);
+            int doy = (int)(absoluteDay - y * DaysPerYear);
+            year = (int)y;
+            month = doy / DaysPerMonth + 1;
+            dayOfMonth = doy % DaysPerMonth + 1;
+        }
+
+        /// <summary>The absolute day on which the season after the one containing this day begins.</summary>
+        public static long NextSeasonStart(long absoluteDay, int seasonLength)
+        {
+            seasonLength = NormaliseLength(seasonLength);
+            return absoluteDay - DayInSeason(absoluteDay, seasonLength) + seasonLength;
+        }
+
         public static Season SeasonOf(long absoluteDay, int seasonLength)
         {
             seasonLength = NormaliseLength(seasonLength);

@@ -172,6 +172,16 @@ namespace FSO.LotView
             State._2D?.ClearTextureCache();
         }
 
+        /// <summary>The foliage season changed: trees and shrubs rebuild their sprites.</summary>
+        public void InvalidateFoliage()
+        {
+            if (Blueprint == null) { return; }
+            foreach (var item in Blueprint.Objects)
+            {
+                if (item.OnSeasonChanged(State)) Blueprint.Changes.RegisterObjectChange(item);
+            }
+        }
+
         public void InvalidatePreciseZoom()
         {
             if (Blueprint == null) { return; }

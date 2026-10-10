@@ -348,6 +348,14 @@ namespace FSO.LotView.Components
             }
         }
 
+        /// <summary>Returns true if this object is foliage whose look depends on the season.</summary>
+        public bool OnSeasonChanged(WorldState world)
+        {
+            if (dgrp == null || dgrp.Foliage == FSO.LotView.Utils.FoliageKind.None) return false;
+            dgrp.InvalidateSeason(world);
+            return true;
+        }
+
         public override void OnZoomChanged(WorldState world)
         {
             base.OnZoomChanged(world);

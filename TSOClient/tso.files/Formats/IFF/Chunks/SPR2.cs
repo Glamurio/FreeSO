@@ -318,6 +318,23 @@ namespace FSO.Files.Formats.IFF.Chunks
             }
         }
 
+        /// <summary>
+        /// The decoded colours of this frame for recolouring (seasonal foliage). The streaming texture upload may clear PixelData
+        /// once it has copied it, so this decodes again when needed and returns null if the frame can no longer be decoded.
+        /// The returned array must not be modified.
+        /// </summary>
+        public Color[] GetPixelsForRecolor()
+        {
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                DecodeIfRequired(false);
+                var px = PixelData;
+                if (px != null) return px;
+                if (ToDecode == null) return null;
+            }
+            return null;
+        }
+
         public void Write(IoWriter io, bool ts1)
         {
             using (var sprStream = new MemoryStream())
