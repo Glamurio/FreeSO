@@ -233,15 +233,18 @@ namespace FSO.Content
         /// <summary>
         /// Which BMP_ chunk holds the catalog picture. Normally the one numbered like the catalog strings (CTSS) id.
         /// Two Legacy Collection downloads ship their picture under another number (ChairDiningAOL: strings 2000, picture
-        /// 2001; SofaLoveSeatAOL: 2000 / 2003), so when the exact id is missing, a lone BMP_ in the 2000-2999 range is used.
+        /// 2001; SofaLoveSeatAOL: 2000 / 2003), so when the exact id is missing, a lone BMP_ in the 2000-2999 range that
+        /// no other object of the file claims is used. Several objects (EP6 and EP7 sculptures, the EP7 cookbook, the
+        /// Lummox floor lamp) have no catalog picture in their files at all: -1.
         /// </summary>
-        public static int PickCatalogBmpId(ushort catalogStringsId, IEnumerable<int> bmpIds)
+        public static int PickCatalogBmpId(ushort catalogStringsId, IEnumerable<int> bmpIds, IEnumerable<int> claimedByOthers = null)
         {
+            var claimed = claimedByOthers == null ? new HashSet<int>() : new HashSet<int>(claimedByOthers);
             int only = -1, count = 0;
             foreach (var id in bmpIds)
             {
                 if (id == catalogStringsId) return id;
-                if (id >= 2000 && id < 3000) { only = id; count++; }
+                if (id >= 2000 && id < 3000 && !claimed.Contains(id)) { only = id; count++; }
             }
             return count == 1 ? only : -1;
         }
@@ -252,7 +255,8 @@ namespace FSO.Content
             if (bmp != null) return bmp;
             var all = Resource.List<BMP>();
             if (all == null) return null;
-            var id = PickCatalogBmpId(OBJ.CatalogStringsID, all.Select(x => (int)x.ChunkID));
+            var others = Resource.List<OBJD>()?.Where(x => x.CatalogStringsID != OBJ.CatalogStringsID).Select(x => (int)x.CatalogStringsID) ?? Enumerable.Empty<int>();
+            var id = PickCatalogBmpId(OBJ.CatalogStringsID, all.Select(x => (int)x.ChunkID), others);
             return id < 0 ? null : all.FirstOrDefault(x => x.ChunkID == id);
         }
     }
