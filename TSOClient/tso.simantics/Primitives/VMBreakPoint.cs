@@ -22,7 +22,8 @@ namespace FSO.SimAntics.Primitives
                 var caller = context.Caller;
                 throw new VMSimanticsException("Breakpoint trap reached (self-looping breakpoint). Last primitive result "
                     + caller.GetValue(VMStackObjectVariable.PrimitiveResult) + ", blocker object "
-                    + caller.GetValue(VMStackObjectVariable.PrimitiveResultID) + ", position " + caller.Position, context);
+                    + caller.GetValue(VMStackObjectVariable.PrimitiveResultID) + ", position " + caller.Position
+                    + ". Last snap failure: " + (VMSnap.LastFailure ?? "(none)"), context);
             }
             return VMPrimitiveExitCode.GOTO_TRUE;
         }

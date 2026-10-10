@@ -17,6 +17,9 @@ namespace FSO.SimAntics.Primitives
         private static uint GOTO_GUID = 0x000007C4;
         private static short SHOO_INTERACTION = 3;
 
+        /// <summary>Why the most recent Snap returned false. Only used to explain "should never happen" traps (see VMBreakPoint).</summary>
+        public static string LastFailure;
+
         public override VMPrimitiveExitCode Execute(VMStackFrame context, VMPrimitiveOperand args)
         {
             var operand = (VMSnapOperand)args;
@@ -62,7 +65,11 @@ namespace FSO.SimAntics.Primitives
                     break;
             }
 
-            if (slot == null) return VMPrimitiveExitCode.GOTO_FALSE;
+            if (slot == null)
+            {
+                LastFailure = "slot not found (mode " + operand.Mode + ", index " + operand.Index + ")";
+                return VMPrimitiveExitCode.GOTO_FALSE;
+            }
 
             var dirSnap = (slot.Rsflags & SLOTFlags.SnapToDirection) > 0;
 
@@ -72,7 +79,11 @@ namespace FSO.SimAntics.Primitives
                 var locations = parser.FindAvaliableLocations(obj, context.VM.Context, avatar);
                 if (slot.SnapTargetSlot > -1)
                 {
-                    if (!context.StackObject.PlaceInSlot(context.Caller, slot.SnapTargetSlot, true, context.VM.Context)) return VMPrimitiveExitCode.GOTO_FALSE;
+                    if (!context.StackObject.PlaceInSlot(context.Caller, slot.SnapTargetSlot, true, context.VM.Context))
+                    {
+                        LastFailure = "could not place in target slot " + slot.SnapTargetSlot;
+                        return VMPrimitiveExitCode.GOTO_FALSE;
+                    }
                     if (locations.Count > 0) avatar.RadianDirection = ((slot.Rsflags & SLOTFlags.SnapToDirection) > 0) ? locations[0].RadianDirection: avatar.RadianDirection;
                 }
                 else
@@ -90,11 +101,12 @@ namespace FSO.SimAntics.Primitives
                         {
                             //set direction regardless. TS1, experimental, breaks chairs snapping onto avatars. if this were correct, it also needs to be in the false branch.
                             //if (dirSnap) avatar.RadianDirection = locations[0].RadianDirection; 
-                            return VMPrimitiveExitCode.GOTO_FALSE;
+                            return VMPrimitiveExitCode.GOTO_FALSE; //LastFailure was set by SetPosition
                         }
                     }
                     else
                     {
+                        LastFailure = "no locations (" + parser.FailCode + "): " + parser.DescribeRejections();
                         if (parser.FailCode == Model.Routing.VMRouteFailCode.NoValidGoals) avatar.SetValue(VMStackObjectVariable.PrimitiveResult, 2);
                         avatar.SetValue(VMStackObjectVariable.PrimitiveResultID, (parser.Blocker == null) ? (short)0 : parser.Blocker.ObjectID);
                         return VMPrimitiveExitCode.GOTO_FALSE;
@@ -114,6 +126,7 @@ namespace FSO.SimAntics.Primitives
             var posChange = entity.SetPosition(pos, (Direction)(1 << (int)(Math.Round(DirectionUtils.PosMod(radDir, (float)Math.PI * 2) / (Math.PI/4)) % 8)), context);
             if (posChange.Status != VMPlacementError.Success)
             {
+                LastFailure = "placement " + posChange.Status + " at " + pos + ", blocked by " + (posChange.Object?.ToString() ?? "nothing");
                 if (shooAva && posChange.Object != null && posChange.Object is VMAvatar)
                 {
                     if (!posChange.Object.Thread.Queue.Any(x => x.Callee != null && x.Callee.Object.GUID == GOTO_GUID && x.InteractionNumber == SHOO_INTERACTION))
