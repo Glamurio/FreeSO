@@ -334,6 +334,14 @@ namespace FSO.SimAntics.Engine
 
             if (BlockingState != null) BlockingState.WaitTime++;
             if (DialogCooldown > 0) DialogCooldown--;
+            if (StaleStackOnLoad)
+            {
+                //The saved stack refers to a routine that does not exist or an instruction past its end, so running it would throw on
+                //its first tick. The exception handler below resets the object anyway; do that directly, without the error dialog.
+                StaleStackOnLoad = false;
+                lock (VMStackFrame.UnresolvedRoutines) if (VMStackFrame.UnresolvedRoutines.Count < 200) VMStackFrame.UnresolvedRoutines.Add("reset on first tick: " + Entity);
+                if (!Entity.Dead) { Entity.Reset(Context); return; }
+            }
 #if !THROW_SIMANTICS
             try
             {
@@ -1173,6 +1181,9 @@ namespace FSO.SimAntics.Engine
             };
         }
 
+        /// <summary>Set when a loaded stack could not be restored (see Tick). Not saved.</summary>
+        private bool StaleStackOnLoad;
+
         public virtual void Load(VMThreadMarshal input, VMContext context)
         {
             Stack = new List<VMStackFrame>();
@@ -1191,6 +1202,7 @@ namespace FSO.SimAntics.Engine
                     Stack.Add(new VMStackFrame(item, context, this));
                 }
             }
+            StaleStackOnLoad = Stack.Any(f => f.GetType() == typeof(VMStackFrame) && (f.Routine == null || f.InstructionPointer >= f.Routine.Instructions.Length));
             Queue = new List<VMQueuedAction>();
             QueueDirty = true;
             foreach (var item in input.Queue) Queue.Add(new VMQueuedAction(item, context));
