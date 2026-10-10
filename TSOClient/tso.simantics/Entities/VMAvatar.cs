@@ -1276,10 +1276,15 @@ namespace FSO.SimAntics
 
         public virtual void LoadCrossRef(VMAvatarMarshal input, VMContext context)
         {
-            if (input.Contained.Length == 0)
+            if (input.Contained.Length < 3)
             {
-                input.Contained = new short[3];
-                input.Contained[0] = input.HandObjectOld;
+                //An avatar always has 3 slots (hand, head, pelvis): TotalSlots() says so and Delete() walks all of them. Avatars
+                //restored from TS1 saves can list fewer, which made GetSlot throw out of the scheduler tick when one was deleted
+                //or tested by a social (found by the smoke test).
+                var slots = new short[3];
+                Array.Copy(input.Contained, slots, input.Contained.Length);
+                if (input.Contained.Length == 0) slots[0] = input.HandObjectOld;
+                input.Contained = slots;
             }
             base.LoadCrossRef(input, context);
             foreach (var obj in Contained)

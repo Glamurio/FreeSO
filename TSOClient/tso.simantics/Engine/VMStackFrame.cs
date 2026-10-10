@@ -152,6 +152,9 @@ namespace FSO.SimAntics.Engine
             };
         }
 
+        /// <summary>Stack frames that could not be restored because their routine does not exist (diagnostics only).</summary>
+        public static readonly System.Collections.Generic.List<string> UnresolvedRoutines = new System.Collections.Generic.List<string>();
+
         public virtual void Load(VMStackFrameMarshal input, VMContext context)
         {
             CodeOwner = FSO.Content.Content.Get().WorldObjects.Get(input.CodeOwnerGUID);
@@ -160,6 +163,15 @@ namespace FSO.SimAntics.Engine
             if (input.RoutineID >= 8192) Routine = (VMRoutine)ScopeResource.SemiGlobal.GetRoutine(input.RoutineID);
             else if (input.RoutineID >= 4096) Routine = (VMRoutine)ScopeResource.GetRoutine(input.RoutineID);
             else Routine = (VMRoutine)Global.Resource.GetRoutine(input.RoutineID);
+
+            if (Routine == null)
+            {
+                //An unresolved routine makes the first tick of this thread throw (GetCurrentInstruction); the object is reset.
+                //Recorded so the smoke test can report which trees a restored stack refers to.
+                lock (UnresolvedRoutines)
+                    if (UnresolvedRoutines.Count < 200)
+                        UnresolvedRoutines.Add($"tree {input.RoutineID} at node {input.InstructionPointer}, owner {CodeOwner?.OBJ?.GUID.ToString("X8") ?? "(none)"} {CodeOwner?.OBJ?.ChunkLabel}");
+            }
 
             InstructionPointer = (byte)input.InstructionPointer;
             Caller = context.VM.GetObjectById(input.Caller);
