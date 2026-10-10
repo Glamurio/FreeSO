@@ -104,6 +104,23 @@ namespace FSO.SimAntics.Seasons
             plant.ExecuteGenericEntryPoint(new OBJfFunctionEntry { ActionFunction = routine }, vm.Context, false, plant, new short[4]);
         }
 
+        /// <summary>Summary for the season_info diagnostic: how many outdoor plants there are, by state.</summary>
+        public static string Describe(VM vm)
+        {
+            int total = 0, healthy = 0, wilted = 0, dead = 0, noRoutine = 0;
+            foreach (var ent in vm.Entities)
+            {
+                if (ent == null || ent.Dead || !(ent is VMGameObject) || ent.Object?.OBJ == null) continue;
+                if (!IsOutdoorPlant(ent.Object.OBJ.ChunkLabel)) continue;
+                total++;
+                var st = ent.GetAttribute(AttrState);
+                if (st == StateDead) dead++; else if (st == StateWilted) wilted++; else healthy++;
+                var r = RoutinesOf(ent);
+                if (r[RoutineUpdate] == 0 || r[RoutineDead] == 0) noRoutine++;
+            }
+            return "outdoor plants " + total + " (healthy " + healthy + ", wilted " + wilted + ", dead " + dead + "), without routines " + noRoutine;
+        }
+
         /// <summary>Applies the action to every outdoor plant on the lot. Returns how many plants were changed.</summary>
         public static int Apply(VM vm, PlantAction action)
         {

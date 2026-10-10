@@ -16,10 +16,14 @@ namespace FSO.LotView.Utils
     {
         private static readonly ConditionalWeakTable<DGRPSprite, Texture2D[]> Cache = new ConditionalWeakTable<DGRPSprite, Texture2D[]>();
 
+        /// <summary>Counters for the season_info diagnostic: sprites recoloured, and the reasons others fell back to the original.</summary>
+        public static int Built, NoFrame, NoPixels, Requests;
+
         public static WorldTexture? Get(GraphicsDevice device, DGRPSprite sprite, FoliageLook look)
         {
+            Requests++;
             var frame = sprite.GetFrame();
-            if (frame == null) return null;
+            if (frame == null) { NoFrame++; return null; }
 
             //the z-buffer is the original's: only the colours change
             var original = frame.GetWorldTexture(device);
@@ -30,7 +34,7 @@ namespace FSO.LotView.Utils
             if (tex == null || tex.IsDisposed)
             {
                 var src = frame.GetPixelsForRecolor();
-                if (src == null || frame.Width <= 0 || frame.Height <= 0 || src.Length < frame.Width * frame.Height) return null;
+                if (src == null || frame.Width <= 0 || frame.Height <= 0 || src.Length < frame.Width * frame.Height) { NoPixels++; return null; }
                 var w = frame.Width;
                 var h = frame.Height;
                 var px = new Color[w * h];
@@ -48,6 +52,7 @@ namespace FSO.LotView.Utils
                 tex.SetData(px);
                 tex.Tag = new TextureInfo(tex, w, h);
                 textures[(int)look] = tex;
+                Built++;
             }
             return new WorldTexture { Pixel = tex, ZBuffer = original.ZBuffer };
         }
