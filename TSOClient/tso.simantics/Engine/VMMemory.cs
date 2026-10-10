@@ -26,7 +26,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return context.Caller.GetAttribute((ushort)data);
 
                 case VMVariableScope.StackObjectAttributes: //1
-                    return context.StackObject.GetAttribute((ushort)data);
+                    return context.StackObject?.GetAttribute((ushort)data) ?? 0;
 
                 case VMVariableScope.TargetObjectAttributes: //2
                     throw new VMSimanticsException("Target Object is Deprecated!", context);
@@ -35,7 +35,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return context.Caller.GetValue((VMStackObjectVariable)data);
 
                 case VMVariableScope.StackObject: //4
-                    return context.StackObject.GetValue((VMStackObjectVariable)data);
+                    return context.StackObject?.GetValue((VMStackObjectVariable)data) ?? 0;
 
                 case VMVariableScope.TargetObject: //5
                     throw new VMSimanticsException("Target Object is Deprecated!", context);
@@ -89,7 +89,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return GetEntityDefinitionVar(context.StackObject.Object.OBJ, (VMOBJDVariable)data, context);
 
                 case VMVariableScope.StackObjectAttributeByParameter: //22
-                    return context.StackObject.GetAttribute((ushort)context.Args[data]);
+                    return context.StackObject?.GetAttribute((ushort)context.Args[data]) ?? 0;
 
                 case VMVariableScope.RoomByTemp0: //23
                     //returns information on the selected room. Right now we don't have a room system, so always return the same values. (everywhere is indoors, not a pool)
@@ -167,7 +167,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return (short)context.Locals[context.Thread.TempRegisters[data]];
 
                 case VMVariableScope.StackObjectAttributeByTemp: //41
-                    return context.StackObject.GetAttribute((ushort)context.Thread.TempRegisters[data]);
+                    return context.StackObject?.GetAttribute((ushort)context.Thread.TempRegisters[data]) ?? 0;
                     
                 case VMVariableScope.TempXL: //42
                     //this needs a really intricate special case for specific operations.
@@ -473,7 +473,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return true;
 
                 case VMVariableScope.StackObjectAttributes: //1
-                    context.StackObject.SetAttribute((ushort)data, value);
+                    context.StackObject?.SetAttribute((ushort)data, value);
                     return true;
 
                 case VMVariableScope.TargetObjectAttributes: //2
@@ -483,7 +483,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return context.Caller.SetValue((VMStackObjectVariable)data, value);
 
                 case VMVariableScope.StackObject: //4
-                    return context.StackObject.SetValue((VMStackObjectVariable)data, value);
+                    return context.StackObject?.SetValue((VMStackObjectVariable)data, value) ?? false;
 
                 case VMVariableScope.TargetObject: //5
                     throw new VMSimanticsException("Target Object is Deprecated!", context);
@@ -544,7 +544,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return false; //you can't set this!
 
                 case VMVariableScope.StackObjectAttributeByParameter: //22
-                    context.StackObject.SetAttribute((ushort)context.Args[data], value);
+                    context.StackObject?.SetAttribute((ushort)context.Args[data], value);
                     return true;
 
                 case VMVariableScope.RoomByTemp0: //23
@@ -604,7 +604,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return true;
 
                 case VMVariableScope.StackObjectAttributeByTemp: //41
-                    context.StackObject.SetAttribute((ushort)context.Thread.TempRegisters[data], value);
+                    context.StackObject?.SetAttribute((ushort)context.Thread.TempRegisters[data], value);
                     return true;
 
                 case VMVariableScope.TempXL: //42

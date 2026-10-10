@@ -106,7 +106,7 @@ namespace FSO.SimAntics.Primitives
                     }
                     else
                     {
-                        LastFailure = "no locations (" + parser.FailCode + "): " + parser.DescribeRejections();
+                        LastFailure = "no locations (" + parser.FailCode + "): " + parser.DescribeRejections() + " [stack object " + obj.ObjectID + (obj == avatar ? " = caller" : " is not the caller " + avatar.ObjectID) + "]";
                         if (parser.FailCode == Model.Routing.VMRouteFailCode.NoValidGoals) avatar.SetValue(VMStackObjectVariable.PrimitiveResult, 2);
                         avatar.SetValue(VMStackObjectVariable.PrimitiveResultID, (parser.Blocker == null) ? (short)0 : parser.Blocker.ObjectID);
                         return VMPrimitiveExitCode.GOTO_FALSE;

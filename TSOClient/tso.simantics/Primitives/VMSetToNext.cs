@@ -122,8 +122,12 @@ namespace FSO.SimAntics.Primitives
                                 return VMPrimitiveExitCode.GOTO_FALSE;
                                 throw new VMSimanticsException("Not implemented!", context);
                             case VMSetToNextSearchType.FamilyMember:
-                                found = ((VMAvatar)temp).GetPersonData(Model.VMPersonDataVariable.TS1FamilyNumber) ==
-                                        ((VMAvatar)Pointer).GetPersonData(Model.VMPersonDataVariable.TS1FamilyNumber);
+                                //objects calling this (e.g. generators) may have no Sim as reference, and the list can hold non-Sims.
+                                var tempAva = temp as VMAvatar;
+                                var pointerAva = Pointer as VMAvatar;
+                                found = tempAva != null && pointerAva != null &&
+                                        tempAva.GetPersonData(Model.VMPersonDataVariable.TS1FamilyNumber) ==
+                                        pointerAva.GetPersonData(Model.VMPersonDataVariable.TS1FamilyNumber);
                                 // context.VM.TS1State.CurrentFamily?.FamilyGUIDs?.Contains(((VMAvatar)temp).Object.OBJ.GUID) ?? false;
                                 break;
                             default:
