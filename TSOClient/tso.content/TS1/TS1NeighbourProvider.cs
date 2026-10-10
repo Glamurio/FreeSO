@@ -87,6 +87,9 @@ namespace FSO.Content.TS1
                 foreach (string newPath in Directory.GetFiles(source, "*.*",
                     SearchOption.AllDirectories))
                     File.Copy(newPath, newPath.Replace('\\', '/').Replace(source, destination), true);
+
+                //remember where the copy came from, so the player can tell which game's saves Simitone is working on.
+                try { File.WriteAllText(Path.Combine(destination, "simitone-import-source.txt"), source); } catch (Exception) { }
             }
 
             UserPath = userPath;

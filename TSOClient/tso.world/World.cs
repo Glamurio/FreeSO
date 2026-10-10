@@ -219,7 +219,8 @@ namespace FSO.LotView
 
             var cursor = CursorType.Normal;
             var scrollVector = new Vector2(0, 0);
-            if (mouse.X > 0 && mouse.Y > 0 && mouse.X < screenWidth && mouse.Y < screenHeight)
+            //the top and left edges are pixel 0: they must count as the edge (they were excluded, so scrolling only worked at the bottom/right).
+            if (mouse.X >= 0 && mouse.Y >= 0 && mouse.X < screenWidth && mouse.Y < screenHeight)
             {
                 if (mouse.Y <= ScrollBounds)
                 {
@@ -254,7 +255,7 @@ namespace FSO.LotView
                     {
                         /** Right **/
                         cursor = CursorType.ArrowRight;
-                        scrollVector = new Vector2(1, -1);
+                        scrollVector = new Vector2(1, 0);
                     }
                 }
                 else
@@ -282,52 +283,8 @@ namespace FSO.LotView
 
             if (cursor != CursorType.Normal)
             {
-                /**
-                 * Calculate scroll vector based on rotation & scroll type
-                 */
-                scrollVector = new Vector2();
-
-                var basis = GetScrollBasis(true);
-
-                switch (cursor)
-                {
-                    case CursorType.ArrowDown:
-                        scrollVector = basis[1];
-                        break;
-
-                    case CursorType.ArrowUp:
-                        scrollVector = -basis[1];
-                        break;
-
-                    case CursorType.ArrowLeft:
-                        scrollVector = -basis[0];
-                        break;
-
-                    case CursorType.ArrowRight:
-                        scrollVector = basis[0];
-                        break;
-
-                    case CursorType.ArrowUpLeft:
-                        scrollVector = -basis[1] - basis[0];
-                        scrollVector *= new Vector2(1, 0.5f);
-                        break;
-
-                    case CursorType.ArrowUpRight:
-                        scrollVector = basis[0] - basis[1];
-                        scrollVector *= new Vector2(1, 0.5f);
-                        break;
-
-                    case CursorType.ArrowDownLeft:
-                        scrollVector = basis[1] - basis[0];
-                        scrollVector *= new Vector2(1, 0.5f);
-                        break;
-
-                    case CursorType.ArrowDownRight:
-                        scrollVector = basis[1] + basis[0];
-                        scrollVector *= new Vector2(1, 0.5f);
-                        break;
-
-                }
+                /** scrollVector holds the screen direction; convert it to a lot movement of the same speed in every direction. **/
+                scrollVector = ScreenToScroll(scrollVector);
 
                 /** We need to scroll **/
                 if (scrollVector != Vector2.Zero)
@@ -412,6 +369,20 @@ namespace FSO.LotView
             }
 
             return new Tuple<float, float>(terrainHeight, targHeight);
+        }
+
+        /// <summary>
+        /// Converts a direction on screen (x right, y down) into a camera movement in lot tiles. The direction is
+        /// normalised first, so diagonals are as fast as straight lines and every direction scrolls at the same speed on screen.
+        /// (The old code summed the two basis vectors, which have different lengths in 2D, and then scaled the result
+        /// in lot space, so the speed depended on the diagonal and the rotation.)
+        /// </summary>
+        public Vector2 ScreenToScroll(Vector2 screenDir)
+        {
+            if (screenDir == Vector2.Zero) return Vector2.Zero;
+            screenDir.Normalize();
+            var basis = GetScrollBasis(true);
+            return screenDir.X * basis[0] + screenDir.Y * basis[1];
         }
 
         public virtual Vector2[] GetScrollBasis(bool multiplied)
