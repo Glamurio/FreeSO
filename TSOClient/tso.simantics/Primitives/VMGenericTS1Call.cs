@@ -295,11 +295,16 @@ namespace FSO.SimAntics.Primitives
                     if (fneigh == null) return VMPrimitiveExitCode.GOTO_FALSE;
                     AddToFamily(context.VM.TS1State.CurrentFamily, fneigh, context.VM);
                     return VMPrimitiveExitCode.GOTO_TRUE;
-                // 34. PromoteFameIfNeeded
+                case VMGenericTS1CallMode.PromoteFameIfNeeded: //34
+                    //TRUE if the star power went up (Sims.exe 0x451054, see VMTS1Fame).
+                    return VMTS1Fame.Apply(context.StackObject as VMAvatar, true, VMTS1Fame.LoadTables())
+                        ? VMPrimitiveExitCode.GOTO_TRUE : VMPrimitiveExitCode.GOTO_FALSE;
+                case VMGenericTS1CallMode.DemoteFameIfNeeded: //36
+                    return VMTS1Fame.Apply(context.StackObject as VMAvatar, false, VMTS1Fame.LoadTables())
+                        ? VMPrimitiveExitCode.GOTO_TRUE : VMPrimitiveExitCode.GOTO_FALSE;
                 case VMGenericTS1CallMode.TakeTaxiHook: //35
                     //not sure where this one is called, seems to have been added for studiotown
                     break;
-                // 36. DemoteFameIfNeeded
                 // 37. CancelPieMenu
                 // 38. GetTokensFromString (MM)
                 // 39. ChildToAdult (let's make this at least keep their skin colour, maybe)
