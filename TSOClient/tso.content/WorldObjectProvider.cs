@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using FSO.Content.Framework;
 using FSO.Common.Content;
 using System.Xml;
@@ -228,6 +229,32 @@ namespace FSO.Content
         public ulong GUID;
         public OBJD OBJ;
         public GameObjectResource Resource;
+
+        /// <summary>
+        /// Which BMP_ chunk holds the catalog picture. Normally the one numbered like the catalog strings (CTSS) id.
+        /// Two Legacy Collection downloads ship their picture under another number (ChairDiningAOL: strings 2000, picture
+        /// 2001; SofaLoveSeatAOL: 2000 / 2003), so when the exact id is missing, a lone BMP_ in the 2000-2999 range is used.
+        /// </summary>
+        public static int PickCatalogBmpId(ushort catalogStringsId, IEnumerable<int> bmpIds)
+        {
+            int only = -1, count = 0;
+            foreach (var id in bmpIds)
+            {
+                if (id == catalogStringsId) return id;
+                if (id >= 2000 && id < 3000) { only = id; count++; }
+            }
+            return count == 1 ? only : -1;
+        }
+
+        public BMP GetCatalogBmp()
+        {
+            var bmp = Resource.Get<BMP>(OBJ.CatalogStringsID);
+            if (bmp != null) return bmp;
+            var all = Resource.List<BMP>();
+            if (all == null) return null;
+            var id = PickCatalogBmpId(OBJ.CatalogStringsID, all.Select(x => (int)x.ChunkID));
+            return id < 0 ? null : all.FirstOrDefault(x => x.ChunkID == id);
+        }
     }
 
     public abstract class GameIffResource

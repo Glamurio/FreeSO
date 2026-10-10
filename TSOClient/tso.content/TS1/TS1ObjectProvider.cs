@@ -137,6 +137,7 @@ namespace FSO.Content.TS1
                         ResetFile(iff);
                     }
                     iff.RuntimeInfo.UseCase = IffUseCase.Object;
+                    ContentHotfixes.Apply(iff);
                 }
 
                 return new GameObjectResource(iff, null, null, reference.FileName, ContentManager);

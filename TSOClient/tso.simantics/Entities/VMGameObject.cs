@@ -313,6 +313,7 @@ namespace FSO.SimAntics
         public override Texture2D GetIcon(GraphicsDevice gd, int store)
         {
             var bmp = Object.Resource.Get<BMP>((ushort)((MasterDefinition ?? Object.OBJ).CatalogStringsID + store * 2000));
+            if (bmp == null && store == 0 && MasterDefinition == null) bmp = Object.GetCatalogBmp();
             if (bmp != null) return bmp.GetTexture(gd);
             else return null;
         }
