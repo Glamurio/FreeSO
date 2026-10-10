@@ -375,7 +375,9 @@ namespace FSO.SimAntics.Utils
 
                 MotiveChanges = new VMMotiveChange[16],
                 MotiveDecay = new VMTS1MotiveDecay(),
-                PersonData = person.PersonData,
+                //Saves made before Superstar store only 0x50 person data fields (see OBJMPerson), but SimAntics code reads up to 100
+                //(e.g. MAGIC - Ghost Social Test): the missing ones are 0.
+                PersonData = ArrayPad(person.PersonData, 101),
                 MotiveData = person.MotiveData.Select(motive =>
                 {
                     return (short)Math.Round(motive);
