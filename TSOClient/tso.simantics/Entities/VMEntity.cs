@@ -206,6 +206,14 @@ namespace FSO.SimAntics
             }
         }
 
+        /// <summary>
+        /// True while the object is not on the lot: out of world, or held by something that is. Pets do this when they
+        /// "Hide" (find_location_for mode 1). The world position is then the void at (-2048, -2048), so the camera
+        /// must not be sent there.
+        /// </summary>
+        public bool IsOffLot => IsOffLotPosition(Position) || (Container != null && Container.IsOffLot);
+        public static bool IsOffLotPosition(LotTilePos pos) => pos == LotTilePos.OUT_OF_WORLD;
+
         public abstract Vector3 VisualPosition { get; set; }
         public abstract FSO.LotView.Model.Direction Direction { get; set; }
         public abstract float RadianDirection { get; set; }

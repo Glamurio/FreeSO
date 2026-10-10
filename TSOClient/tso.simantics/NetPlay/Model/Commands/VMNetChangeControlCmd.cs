@@ -30,7 +30,7 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             vm.Context.ObjectQueries.RegisterAvatarPersist((VMAvatar)target, target.PersistID);
             vm.SetGlobalValue(3, target.ObjectID);
 
-            if (VM.UseWorld)
+            if (VM.UseWorld && !target.IsOffLot) //hidden pets are in the void: keep the camera where it is
             {
                 vm.Context.World.CenterTo(target.WorldUI);
             }
