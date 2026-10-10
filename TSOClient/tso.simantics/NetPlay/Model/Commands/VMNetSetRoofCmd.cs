@@ -20,7 +20,7 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             var oldStyle = arch.RoofStyle;
             arch.SetRoof(Pitch, Style);
             if ((oldPitch != Pitch || oldStyle != Style) && vm.OnArchitectureChange != null)
-                vm.OnArchitectureChange(new Model.VMArchitectureChange()
+                vm.OnArchitectureChange(new VMArchitectureChange()
                     { Roof = true, OldPitch = oldPitch, NewPitch = Pitch, OldStyle = oldStyle, NewStyle = Style, ActorUID = ActorUID });
             return true;
         }
