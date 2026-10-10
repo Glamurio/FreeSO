@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using FSO.Content;
 using FSO.SimAntics.Marshals.Threads;
 
@@ -155,6 +156,18 @@ namespace FSO.SimAntics.Engine
         /// <summary>Stack frames that could not be restored because their routine does not exist (diagnostics only).</summary>
         public static readonly System.Collections.Generic.List<string> UnresolvedRoutines = new System.Collections.Generic.List<string>();
 
+        private string DescribeOwnerBhavs(ushort id)
+        {
+            try
+            {
+                var res = CodeOwner?.Resource;
+                var iffBhavs = res?.MainIff?.List<FSO.Files.Formats.IFF.Chunks.BHAV>();
+                var raw = iffBhavs?.FirstOrDefault(x => x.ChunkID == id);
+                return $"file {(res as FSO.Content.GameObjectResource)?.Name}: {iffBhavs?.Count ?? -1} BHAV chunks in file, chunk {id} {(raw == null ? "absent" : "present, " + raw.Instructions.Length + " instructions")}, {res?.RoutineCache?.Count ?? -1} routines cached, first ids {string.Join(",", (iffBhavs ?? new System.Collections.Generic.List<FSO.Files.Formats.IFF.Chunks.BHAV>()).Take(6).Select(x => x.ChunkID))}";
+            }
+            catch (Exception e) { return "diagnostic failed: " + e.Message; }
+        }
+
         public virtual void Load(VMStackFrameMarshal input, VMContext context)
         {
             CodeOwner = FSO.Content.Content.Get().WorldObjects.Get(input.CodeOwnerGUID);
@@ -170,7 +183,7 @@ namespace FSO.SimAntics.Engine
                 //Recorded so the smoke test can report which trees a restored stack refers to.
                 lock (UnresolvedRoutines)
                     if (UnresolvedRoutines.Count < 200)
-                        UnresolvedRoutines.Add($"tree {input.RoutineID} at node {input.InstructionPointer}, owner {CodeOwner?.OBJ?.GUID.ToString("X8") ?? "(none)"} {CodeOwner?.OBJ?.ChunkLabel}");
+                        UnresolvedRoutines.Add($"tree {input.RoutineID} at node {input.InstructionPointer}, owner {CodeOwner?.OBJ?.GUID.ToString("X8") ?? "(none)"} {CodeOwner?.OBJ?.ChunkLabel} [{DescribeOwnerBhavs(input.RoutineID)}]");
             }
 
             InstructionPointer = (byte)input.InstructionPointer;
