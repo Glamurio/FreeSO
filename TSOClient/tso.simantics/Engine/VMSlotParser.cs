@@ -334,7 +334,10 @@ namespace FSO.SimAntics.Engine
                 score -= LotTilePos.Distance(tpos, caller.Position) / 3.0;
             }
 
-            if (Slot.SnapTargetSlot < 0 && context.Architecture.RaycastWall(new Point((int)pos.X, (int)pos.Y), new Point(obj.Position.TileX, obj.Position.TileY), level))
+            //An object snapping itself (obj == caller, e.g. the Unleashed rabbit hopping between tiles) is not walking up to
+            //something: its own BHAV decides where it may go, and the wall ray would start at its own tile. The rabbit's
+            //"Setup for Move" treats a failed snap as impossible (it loops forever on a breakpoint).
+            if (Slot.SnapTargetSlot < 0 && obj != caller && context.Architecture.RaycastWall(new Point((int)pos.X, (int)pos.Y), new Point(obj.Position.TileX, obj.Position.TileY), level))
             {
                 SetFail(VMRouteFailCode.WallInWay, null);
                 Reject("wall in the way");
