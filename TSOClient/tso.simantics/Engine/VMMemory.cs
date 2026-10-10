@@ -65,7 +65,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return context.StackObject.Thread.TempRegisters[data];
 
                 case VMVariableScope.MyMotives: //14
-                    return ((VMAvatar)context.Caller).GetMotiveData((VMMotive)data);
+                    return (context.Caller as VMAvatar)?.GetMotiveData((VMMotive)data) ?? 0;
 
                 case VMVariableScope.StackObjectMotives: //15
                     return (context.StackObject as VMAvatar)?.GetMotiveData((VMMotive)data) ?? 0;
@@ -74,13 +74,13 @@ namespace FSO.SimAntics.Engine.Utils
                     return context.StackObject.GetSlot(data)?.ObjectID ?? 0;
 
                 case VMVariableScope.StackObjectMotiveByTemp: //17
-                    return ((VMAvatar)context.StackObject).GetMotiveData((VMMotive)context.Thread.TempRegisters[data]);
+                    return (context.StackObject as VMAvatar)?.GetMotiveData((VMMotive)context.Thread.TempRegisters[data]) ?? 0;
 
                 case VMVariableScope.MyPersonData: //18
-                    return ((VMAvatar)context.Caller).GetPersonData((VMPersonDataVariable)data);
+                    return (context.Caller as VMAvatar)?.GetPersonData((VMPersonDataVariable)data) ?? 0;
 
                 case VMVariableScope.StackObjectPersonData: //19
-                    return ((VMAvatar)context.StackObject).GetPersonData((VMPersonDataVariable)data);
+                    return (context.StackObject as VMAvatar)?.GetPersonData((VMPersonDataVariable)data) ?? 0;
 
                 case VMVariableScope.MySlot: //20
                     return context.Caller.GetSlot(data)?.ObjectID ?? 0;
@@ -124,10 +124,10 @@ namespace FSO.SimAntics.Engine.Utils
                     return GetTreeAd(context, 0, (ushort)data);
 
                 case VMVariableScope.MyPersonDataByTemp: //30
-                    return ((VMAvatar)context.Caller).GetPersonData((VMPersonDataVariable)(context.Thread.TempRegisters[data]));
+                    return (context.Caller as VMAvatar)?.GetPersonData((VMPersonDataVariable)(context.Thread.TempRegisters[data])) ?? 0;
 
                 case VMVariableScope.StackObjectPersonDataByTemp: //31
-                    return ((VMAvatar)context.StackObject).GetPersonData((VMPersonDataVariable)(context.Thread.TempRegisters[data]));
+                    return (context.StackObject as VMAvatar)?.GetPersonData((VMPersonDataVariable)(context.Thread.TempRegisters[data])) ?? 0;
 
                 case VMVariableScope.NeighborPersonData: //32
                     if (!context.VM.TS1) throw new VMSimanticsException("Only valid in TS1.", context);
@@ -520,7 +520,7 @@ namespace FSO.SimAntics.Engine.Utils
                     return true;
 
                 case VMVariableScope.MyMotives: //14
-                    return ((VMAvatar)context.Caller).SetMotiveData((VMMotive)data, value);
+                    return (context.Caller as VMAvatar)?.SetMotiveData((VMMotive)data, value) ?? false;
 
                 case VMVariableScope.StackObjectMotives: //15
                     return (context.StackObject as VMAvatar)?.SetMotiveData((VMMotive)data, value) ?? false;
@@ -529,13 +529,13 @@ namespace FSO.SimAntics.Engine.Utils
                     throw new VMSimanticsException("Not implemented...", context);
 
                 case VMVariableScope.StackObjectMotiveByTemp: //17
-                    return ((VMAvatar)context.StackObject).SetMotiveData((VMMotive)context.Thread.TempRegisters[data], value);
+                    return (context.StackObject as VMAvatar)?.SetMotiveData((VMMotive)context.Thread.TempRegisters[data], value) ?? false;
 
                 case VMVariableScope.MyPersonData: //18
-                    return ((VMAvatar)context.Caller).SetPersonData((VMPersonDataVariable)data, value);
+                    return (context.Caller as VMAvatar)?.SetPersonData((VMPersonDataVariable)data, value) ?? false;
 
                 case VMVariableScope.StackObjectPersonData: //19
-                    return ((VMAvatar)context.StackObject).SetPersonData((VMPersonDataVariable)data, value);
+                    return (context.StackObject as VMAvatar)?.SetPersonData((VMPersonDataVariable)data, value) ?? false;
 
                 case VMVariableScope.MySlot: //20
                     throw new VMSimanticsException("Not implemented...", context);
@@ -571,10 +571,10 @@ namespace FSO.SimAntics.Engine.Utils
                     return SetTreeAd(context, 0, (ushort)data, value);
 
                 case VMVariableScope.MyPersonDataByTemp: //30
-                    return ((VMAvatar)context.Caller).SetPersonData((VMPersonDataVariable)context.Thread.TempRegisters[data], value);
+                    return (context.Caller as VMAvatar)?.SetPersonData((VMPersonDataVariable)context.Thread.TempRegisters[data], value) ?? false;
 
                 case VMVariableScope.StackObjectPersonDataByTemp: //31
-                    return ((VMAvatar)context.StackObject).SetPersonData((VMPersonDataVariable)context.Thread.TempRegisters[data], value);
+                    return (context.StackObject as VMAvatar)?.SetPersonData((VMPersonDataVariable)context.Thread.TempRegisters[data], value) ?? false;
 
                 case VMVariableScope.NeighborPersonData: //32
                     throw new VMSimanticsException("Not implemented...", context);
