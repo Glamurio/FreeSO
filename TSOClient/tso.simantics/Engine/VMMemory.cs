@@ -452,7 +452,10 @@ namespace FSO.SimAntics.Engine.Utils
                 case VMOBJDVariable.Version2:
                     return (short)(objd.Version>>16);
                 default:
-                    return (short)objd.RawData[((int)var) - 2];
+                    //older OBJD versions store fewer fields than the newest (e.g. 97 vs 105); fields past the end read as 0.
+                    //(Pets' "Dream - Pet - About Object" reads field 100 of any object.)
+                    var rawIndex = ((int)var) - 2;
+                    return (rawIndex >= 0 && rawIndex < objd.RawData.Length) ? (short)objd.RawData[rawIndex] : (short)0;
             }
         }
             
