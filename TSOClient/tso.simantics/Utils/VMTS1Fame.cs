@@ -1,4 +1,4 @@
-using FSO.Files.Formats.IFF;
+﻿using FSO.Files.Formats.IFF;
 using FSO.Files.Formats.IFF.Chunks;
 using FSO.SimAntics.Model;
 using System;
@@ -67,7 +67,7 @@ namespace FSO.SimAntics.Utils
                 if (entry == null || !entry.StartsWith(name + ": ", StringComparison.OrdinalIgnoreCase)) continue;
                 var text = entry.Substring(name.Length + 2).Trim();
                 float v;
-                if (float.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out v)) return v;
+                //game data is written with '.' decimals whatever the system language is, so invariant must come first.
                 if (float.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v)) return v;
             }
             return null;

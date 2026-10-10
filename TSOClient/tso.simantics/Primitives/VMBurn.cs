@@ -11,6 +11,25 @@ namespace FSO.SimAntics.Primitives
     {
         public static uint FIRE_GUID = 0x24C95F99; //probably different for ts1
 
+        /// <summary>
+        /// The tile in front of an object. An object that is off the lot (OUT_OF_WORLD: a Sim at work, a hidden pet) has no
+        /// front: offsetting its position would produce a nearby coordinate that no longer equals OUT_OF_WORLD, so the fire
+        /// would be created off the lot (riperiperi/Simitone#24).
+        /// </summary>
+        public static LotTilePos FrontOf(LotTilePos pos, FSO.LotView.Model.Direction direction)
+        {
+            if (pos == LotTilePos.OUT_OF_WORLD) return pos;
+            var front = new LotTilePos(pos);
+            switch (direction)
+            {
+                case FSO.LotView.Model.Direction.SOUTH: front.y += 16; break;
+                case FSO.LotView.Model.Direction.WEST: front.x -= 16; break;
+                case FSO.LotView.Model.Direction.EAST: front.x += 16; break;
+                case FSO.LotView.Model.Direction.NORTH: front.y -= 16; break;
+            }
+            return front;
+        }
+
         public override VMPrimitiveExitCode Execute(VMStackFrame context, VMPrimitiveOperand args)
         {
             var operand = (VMBurnOperand)args;
@@ -38,33 +57,9 @@ namespace FSO.SimAntics.Primitives
             bool[] fires = new bool[arch.Width * arch.Height];
             var spread = new Queue<LotTilePos>();
 
-            LotTilePos pos;
-            switch (operand.Type)
-            {
-                case VMBurnType.FrontOfStackObject:
-                    pos = new LotTilePos(context.StackObject.Position);
-                    switch (context.StackObject.Direction)
-                    {
-                        case FSO.LotView.Model.Direction.SOUTH:
-                            pos.y += 16;
-                            break;
-                        case FSO.LotView.Model.Direction.WEST:
-                            pos.x -= 16;
-                            break;
-                        case FSO.LotView.Model.Direction.EAST:
-                            pos.x += 16;
-                            break;
-                        case FSO.LotView.Model.Direction.NORTH:
-                            pos.y -= 16;
-                            break;
-                    }
-                    break;
-                case VMBurnType.StackObject:
-                default:
-                    pos = context.StackObject.Position;
-                    break;
-
-            }
+            var pos = operand.Type == VMBurnType.FrontOfStackObject
+                ? FrontOf(context.StackObject.Position, context.StackObject.Direction)
+                : context.StackObject.Position;
             if (pos == LotTilePos.OUT_OF_WORLD) return VMPrimitiveExitCode.GOTO_FALSE;
 
             bool first = true;
@@ -96,7 +91,7 @@ namespace FSO.SimAntics.Primitives
                         //for each tile add a spread.
 
                         //is this object burnable? if so, set it as burning
-                        if (sobj.Position.Level != pos.Level) continue;
+                        if (sobj.Position == LotTilePos.OUT_OF_WORLD || sobj.Position.Level != pos.Level) continue;
 
                         if ((((VMEntityFlags2)sobj.GetValue(Model.VMStackObjectVariable.FlagField2) & VMEntityFlags2.Burns) > 0) && !sobj.GetFlag(VMEntityFlags.FireProof))
                         {
