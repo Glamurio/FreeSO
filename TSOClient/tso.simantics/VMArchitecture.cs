@@ -967,6 +967,26 @@ namespace FSO.SimAntics
             return marshal;
         }
 
+        /// <summary>The whole architecture (walls, floors, terrain, roof) as bytes, for undo.</summary>
+        public byte[] Snapshot()
+        {
+            return Save().Preserialized;
+        }
+
+        /// <summary>Puts back a state taken with Snapshot() and has the rooms and the display rebuilt.</summary>
+        public void RestoreSnapshot(byte[] data)
+        {
+            var marshal = new VMArchitectureMarshal(VMMarshal.LATEST_VERSION);
+            using (var mem = new System.IO.MemoryStream(data))
+            using (var io = new System.IO.BinaryReader(mem))
+            {
+                marshal.Deserialize(io);
+            }
+            Load(marshal);
+            if (VM.UseWorld) WorldUI.RoofComp.SetStylePitch(RoofStyle, RoofPitch);
+            SignalAllDirty();
+        }
+
         public virtual void Load(VMArchitectureMarshal input)
         {
             Width = input.Width;

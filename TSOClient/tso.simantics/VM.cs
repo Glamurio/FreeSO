@@ -113,6 +113,9 @@ namespace FSO.SimAntics
         public List<VMLoadError> LoadErrors = new List<VMLoadError>();
         public List<VMInventoryItem> MyInventory = new List<VMInventoryItem>();
 
+        /// <summary>Called after a player's architecture or roof command ran (Simitone undo). Not serialized.</summary>
+        public Action<VMArchitectureChange> OnArchitectureChange;
+
         public event VMDialogHandler OnDialog;
         public event VMChatEventHandler OnChatEvent;
         public event VMRefreshHandler OnFullRefresh;

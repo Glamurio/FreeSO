@@ -1,4 +1,5 @@
-﻿using FSO.SimAntics.Model.TSOPlatform;
+﻿using FSO.SimAntics.Model;
+using FSO.SimAntics.Model.TSOPlatform;
 using System;
 using System.IO;
 
@@ -14,7 +15,13 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             if (!vm.TS1 && (caller == null || caller.AvatarState.Permissions < VMTSOAvatarPermissions.Owner)) return false;
             if (Style >= Content.Content.Get().WorldRoofs.Count) return false;
             Pitch = Math.Max(0f, Math.Min(1.25f, Pitch));
-            vm.Context.Architecture.SetRoof(Pitch, Style);
+            var arch = vm.Context.Architecture;
+            var oldPitch = arch.RoofPitch;
+            var oldStyle = arch.RoofStyle;
+            arch.SetRoof(Pitch, Style);
+            if ((oldPitch != Pitch || oldStyle != Style) && vm.OnArchitectureChange != null)
+                vm.OnArchitectureChange(new Model.VMArchitectureChange()
+                    { Roof = true, OldPitch = oldPitch, NewPitch = Pitch, OldStyle = oldStyle, NewStyle = Style, ActorUID = ActorUID });
             return true;
         }
 

@@ -59,6 +59,7 @@ namespace FSO.SimAntics.NetPlay.Model
             { VMCommandType.SM64Event, typeof(VMNetSM64EventCmd) },
             { VMCommandType.SM64AnimData, typeof(VMNetSM64AnimDataCmd) },
             { VMCommandType.UndoBuy, typeof(VMNetUndoBuyCmd) },
+            { VMCommandType.UndoArchitecture, typeof(VMNetUndoArchitectureCmd) },
         };
         public static Dictionary<Type, VMCommandType> ReverseMap = CmdMap.ToDictionary(x => x.Value, x => x.Key);
 
@@ -174,6 +175,7 @@ namespace FSO.SimAntics.NetPlay.Model
         SM64AnimData = 48,
 
         //Simitone build/buy undo
-        UndoBuy = 49
+        UndoBuy = 49,
+        UndoArchitecture = 50
     }
 }

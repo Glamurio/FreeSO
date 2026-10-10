@@ -17,7 +17,12 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
                 cmd.CallerUID = ActorUID;
                 Commands[i] = cmd;
             }
-            vm.Context.Architecture.RunCommands(Commands, false);
+            var arch = vm.Context.Architecture;
+            var hook = vm.OnArchitectureChange;
+            //Simitone undo: remember how things were before this command changed them.
+            var before = (hook != null && Commands.Count > 0) ? arch.Snapshot() : null;
+            var cost = arch.RunCommands(Commands, false);
+            if (before != null) hook(new VMArchitectureChange() { Before = before, Cost = cost, ActorUID = ActorUID });
             return true;
         }
 
