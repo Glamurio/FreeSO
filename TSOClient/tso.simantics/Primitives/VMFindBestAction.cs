@@ -163,7 +163,7 @@ namespace FSO.SimAntics.Primitives
                 {
                     //the lockout count is set by the standard exit tree after an object is used, and decays over time.
                     //find best object for function already skips locked out objects; free will ignored it.
-                    if (obj != caller && obj.GetValue(VMStackObjectVariable.LockoutCount) > 0) continue;
+                    if (SkipForLockout(VMFeatures.AutonomyLockout, obj == caller, obj.GetValue(VMStackObjectVariable.LockoutCount))) continue;
                     if (!VMReachability.CanReach(reachable, obj, context.VM.Context)) objFactor = UNREACHABLE_FACTOR;
                     else if (VMRouteFailMemory.RecentlyFailed(caller, obj)) objFactor = RECENT_FAILURE_FACTOR;
                 }
@@ -329,6 +329,16 @@ namespace FSO.SimAntics.Primitives
                 return VMPrimitiveExitCode.GOTO_FALSE;
             }
             
+        }
+
+        /// <summary>
+        /// Whether free will leaves an object out because its lockout count is running (VMFeatures.AutonomyLockout, off by
+        /// default). The Sim's own interactions (Hide, pet tricks, ...) are never locked out by this, so with the filter on
+        /// they were the only candidates left once the objects a pet had used were locked, and pets did nothing but Hide.
+        /// </summary>
+        public static bool SkipForLockout(bool enabled, bool isCaller, int lockoutCount)
+        {
+            return enabled && !isCaller && lockoutCount > 0;
         }
 
         /// <summary>Score multiplier for objects in rooms the Sim can't reach through doors and stairs.</summary>

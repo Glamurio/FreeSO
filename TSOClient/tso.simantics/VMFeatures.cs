@@ -75,10 +75,16 @@ namespace FSO.SimAntics
         public static bool QueueRecovery = true;
 
         /// <summary>
-        /// Free will fixes (roadmap 6): objects whose lockout count is running are skipped (as "find best object" already
-        /// does), and objects in rooms the Sim can't reach or that it just failed to route to score much lower.
+        /// Free will fixes (roadmap 6): objects in rooms the Sim can't reach or that it just failed to route to score much lower.
         /// </summary>
         public static bool AutonomyFixes = true;
+
+        /// <summary>
+        /// Part of the free will fixes, split out because it is not verified against the original game: objects whose
+        /// lockout count is running are skipped by free will. Off by default; with it on, pets spammed "Hide" (see
+        /// VMFindBestAction.SkipForLockout).
+        /// </summary>
+        public static bool AutonomyLockout = false;
 
         /// <summary>
         /// Free will balance fix (roadmap 6): an action with several pie menu entries was added to the candidate list
