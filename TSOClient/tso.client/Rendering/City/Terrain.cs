@@ -1278,7 +1278,7 @@ namespace FSO.Client.Rendering.City
             Time = (float)time;
             time = FinaleUtils.BiasSunTime(time);
 
-            if (Weather.Darken > 0)
+            if (Weather.HasTint)
             {
                 //tint the outside colour, usually with some darkening effect.
                 m_TintColor = new Color(

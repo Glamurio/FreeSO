@@ -25,6 +25,21 @@ namespace FSO.LotView.Model
         public bool IsManual => (WeatherData & (1 << 8)) > 0;
         public WeatherType WeatherType => (WeatherType)((WeatherData >> 9) & 3);
         public bool IsThunder => (WeatherData & (1 << 11)) > 0;
+        /// <summary>Simitone: a heatwave (bit 12). Intensity is how hot; no precipitation.</summary>
+        public bool IsHeatwave => (WeatherData & (1 << 12)) > 0;
+        /// <summary>Simitone: the ground is covered in snow whatever is falling (bit 13), used for winter.</summary>
+        public bool HasSnowCover => (WeatherData & (1 << 13)) > 0;
+
+        //Simitone: tint over outdoor light from the season, a heatwave and fog, combined with the rain darkening.
+        public Color SeasonTint = Color.White;
+        public float SeasonTintAmount;
+        public float HeatIntensity;
+        public float FogIntensity;
+        /// <summary>True when any tint is active; the city terrain only multiplies the tint in when this is set.</summary>
+        public bool HasTint { get; private set; }
+        private static readonly Color RainTint = new Color(159, 164, 181);
+        private static readonly Color HeatTint = new Color(255, 205, 150);
+        private static readonly Color FogTint = new Color(205, 212, 218);
 
         public float[] ModeToIntensity = new float[]
         {
@@ -70,6 +85,29 @@ namespace FSO.LotView.Model
                 col.W);
         }
 
+        /// <summary>Combines the rain darkening with the season, heatwave and fog tints and hands the result to the lot and city.</summary>
+        public void ApplyTint()
+        {
+            var v = Color.Lerp(Color.White, RainTint, Darken).ToVector4();
+            if (SeasonTintAmount > 0) v *= Color.Lerp(Color.White, SeasonTint, SeasonTintAmount).ToVector4();
+            if (HeatIntensity > 0) v *= Color.Lerp(Color.White, HeatTint, HeatIntensity * 0.8f).ToVector4();
+            if (FogIntensity > 0) v *= Color.Lerp(Color.White, FogTint, FogIntensity * 0.7f).ToVector4();
+            OutsideWeatherTint = new Color(v);
+            HasTint = Darken > 0 || SeasonTintAmount > 0 || HeatIntensity > 0 || FogIntensity > 0;
+            if (Bp != null)
+            {
+                Bp.OutsideWeatherTint = OutsideWeatherTint;
+                Bp.OutsideWeatherTintP = HasTint ? 1f : 0f;
+            }
+        }
+
+        public void SetSeasonTint(Color tint, float amount)
+        {
+            SeasonTint = tint;
+            SeasonTintAmount = amount;
+            ApplyTint();
+        }
+
         public void Update()
         {
             var now = DateTime.UtcNow;
@@ -88,6 +126,7 @@ namespace FSO.LotView.Model
             var enabled = WorldConfig.Current.Weather;
 
             ParticleType ptype;
+            bool particles = true;
 
             if (IsManual && !FinaleUtils.IsFinale())
             {
@@ -96,17 +135,32 @@ namespace FSO.LotView.Model
                 LastEnabled = enabled;
 
                 var type = WeatherType;
-                WeatherIntensity = (WeatherData & 0xFF) / 100f;
-                Darken = (type == WeatherType.Rain) ? WeatherIntensity : 0;
-
-                switch (type)
+                var strength = (WeatherData & 0xFF) / 100f;
+                HeatIntensity = 0;
+                FogIntensity = 0;
+                if (IsHeatwave)
                 {
-                    case WeatherType.Snow:
-                        ptype = ParticleType.SNOW;
-                        break;
-                    default:
-                        ptype = ParticleType.RAIN;
-                        break;
+                    //hot and bright: a tint, no precipitation.
+                    HeatIntensity = strength;
+                    WeatherIntensity = 0;
+                    Darken = 0;
+                    ptype = ParticleType.RAIN;
+                    particles = false;
+                }
+                else if (type == WeatherType.Fog)
+                {
+                    //fog thickens the distance fog of the surroundings and greys and dims the light; no particles.
+                    FogIntensity = strength;
+                    WeatherIntensity = strength;
+                    Darken = strength * 0.3f;
+                    ptype = ParticleType.RAIN;
+                    particles = false;
+                }
+                else
+                {
+                    WeatherIntensity = strength;
+                    Darken = (type == WeatherType.Rain) ? WeatherIntensity : 0;
+                    ptype = (type == WeatherType.Snow) ? ParticleType.SNOW : ParticleType.RAIN;
                 }
             }
             else
@@ -123,17 +177,13 @@ namespace FSO.LotView.Model
                 Darken = ModeToDarken[curInt] * i + ModeToDarken[lastInt] * (1 - i);
 
                 ptype = (ParticleType)(curInt / 3);
+                HeatIntensity = 0;
+                FogIntensity = 0;
             }
 
-            OutsideWeatherTint = Color.Lerp(Color.White, new Color(159, 164, 181), Darken);
+            ApplyTint();
 
-            if (Bp != null)
-            {
-                Bp.OutsideWeatherTint = new Color(159, 164, 181);
-                Bp.OutsideWeatherTintP = Darken;
-            }
-
-            if (WeatherIntensity > 0.01f && enabled)
+            if (WeatherIntensity > 0.01f && enabled && particles)
             {
                 bool isFaded = false;
                 //is the new weather different enough? does the old one need to be refreshed?
@@ -205,6 +255,7 @@ namespace FSO.LotView.Model
     {
         Rain = 0,
         Snow = 1,
-        Hail = 2
+        Hail = 2,
+        Fog = 3 //Simitone: fog (only ever set by the seasons or the weather cheat)
     }
 }

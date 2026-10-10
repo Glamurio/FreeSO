@@ -81,12 +81,37 @@ namespace FSO.LotView.Components
             var forceSnow = DynamicTuning.Global?.GetTuning("city", 0, 0);
             if (forceSnow != null) ForceSnow(forceSnow.Value);
 
+            BaseLightType = LightType;
+            BaseDarkType = DarkType;
+            SeasonGround = 0;
+
             GrassState = grass;
             GroundHeight = heights;
             UpdateLotType();
             TerrainDirty = true;
 
             Bp.SM64?.UpdateTerrain();
+        }
+
+        //Simitone seasons: the terrain types the lot came with, so a season can be applied and later removed again.
+        private TerrainType BaseLightType;
+        private TerrainType BaseDarkType;
+        private int SeasonGround;
+
+        /// <summary>
+        /// Shows the ground for a season: 0 as the lot is (spring, summer), 1 autumn grass, 2 snow. Vacation snow lots stay
+        /// snowy in every mode. Does nothing if the mode is already shown.
+        /// </summary>
+        public void SetSeasonGround(int mode)
+        {
+            if (mode == SeasonGround) return;
+            SeasonGround = mode;
+            LightType = BaseLightType;
+            DarkType = BaseDarkType;
+            if (mode == 1) ForceSnow(2f);
+            else if (mode == 2) ForceSnow(0f);
+            UpdateLotType();
+            TerrainDirty = true;
         }
 
         public void ForceSnow(float type)
