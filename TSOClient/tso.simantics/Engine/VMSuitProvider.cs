@@ -142,20 +142,20 @@ namespace FSO.SimAntics.Engine
                 case VMPersonSuits.TS1Rave:
                 case VMPersonSuits.TS1Costume: //person strings 27. hands: 28, 29
                 case VMPersonSuits.TS1ExpandedFormal: //person strings 30 (f###)
-                    toHandCopy = new VMOutfitReference(bodyStrings.GetString(30), false);
+                    toHandCopy = ExpandedSuit(bodyStrings, 30);
                     break;
                 case VMPersonSuits.TS1ExpandedSwimsuit: //person strings 31 (s###)
-                    toHandCopy = new VMOutfitReference(bodyStrings.GetString(31), false);
+                    toHandCopy = ExpandedSuit(bodyStrings, 31);
                     break;
                 case VMPersonSuits.TS1ExpandedPajamas: //person strings 32 (l###)
-                    toHandCopy = new VMOutfitReference(bodyStrings.GetString(32), false);
+                    toHandCopy = ExpandedSuit(bodyStrings, 32);
                     break;
                 case VMPersonSuits.TS1Disco: //???
                 case VMPersonSuits.TS1Winter: //person strings 33 (w###)
-                    toHandCopy = new VMOutfitReference(bodyStrings.GetString(33), false);
+                    toHandCopy = ExpandedSuit(bodyStrings, 33);
                     break;
                 case VMPersonSuits.TS1HighFashion: //person strings 34 (h###)
-                    toHandCopy = new VMOutfitReference(bodyStrings.GetString(34), false);
+                    toHandCopy = ExpandedSuit(bodyStrings, 34);
                     break;
             }
 
@@ -171,6 +171,16 @@ namespace FSO.SimAntics.Engine
                 else toHandCopy.OftData.LiteralHandgroup = avatar.DefaultSuits.Daywear.OftData?.LiteralHandgroup;
             }
             return toHandCopy;
+        }
+
+        /// <summary>
+        /// Some Sims have no entry for the expanded outfit slots (body strings 30-34). Return null in that case
+        /// so the caller leaves the Sim's current outfit alone, rather than handing Outfit.Read a null string.
+        /// </summary>
+        private static VMOutfitReference ExpandedSuit(STR bodyStrings, int index)
+        {
+            var name = bodyStrings.GetString(index);
+            return IsValid(name) ? new VMOutfitReference(name, false) : null;
         }
 
         private static bool IsValid(string suitName)
