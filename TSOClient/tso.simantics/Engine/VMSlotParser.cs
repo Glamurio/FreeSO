@@ -334,10 +334,11 @@ namespace FSO.SimAntics.Engine
                 score -= LotTilePos.Distance(tpos, caller.Position) / 3.0;
             }
 
-            //An object snapping itself (obj == caller, e.g. the Unleashed rabbit hopping between tiles) is not walking up to
-            //something: its own BHAV decides where it may go, and the wall ray would start at its own tile. The rabbit's
-            //"Setup for Move" treats a failed snap as impossible (it loops forever on a breakpoint).
-            if (Slot.SnapTargetSlot < 0 && obj != caller && context.Architecture.RaycastWall(new Point((int)pos.X, (int)pos.Y), new Point(obj.Position.TileX, obj.Position.TileY), level))
+            //The wall ray only means something for a Sim that has to walk to the slot. Objects that move themselves with
+            //Snap (the Unleashed rabbit snaps to a slot next to a reserve-tile object it just created, roaches, etc.) never
+            //walk, and their BHAVs treat a failed Snap as impossible: the rabbit's "Setup for Move" loops forever on a
+            //breakpoint when it fails next to a fence.
+            if (Slot.SnapTargetSlot < 0 && caller is VMAvatar && context.Architecture.RaycastWall(new Point((int)pos.X, (int)pos.Y), new Point(obj.Position.TileX, obj.Position.TileY), level))
             {
                 SetFail(VMRouteFailCode.WallInWay, null);
                 Reject("wall in the way");
