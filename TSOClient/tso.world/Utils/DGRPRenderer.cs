@@ -44,12 +44,16 @@ namespace FSO.LotView.Utils
         /// <summary>Trees and shrubs get a seasonal look (see SeasonalFoliage); everything else is None.</summary>
         public FoliageKind Foliage;
         private FoliageLook AppliedLook;
+        private FoliageLeaf FoliageLeafType;
+        private bool FoliageFruit;
 
         public DGRPRenderer(DGRP group, OBJD source)
         {
             this.DrawGroup = group;
             this.Source = source;
-            Foliage = SeasonalFoliage.Classify(source?.ChunkLabel);
+            Foliage = SeasonalFoliage.Classify(source?.ChunkLabel, source?.GUID ?? 0);
+            FoliageLeafType = SeasonalFoliage.LeafOf(source?.ChunkLabel);
+            FoliageFruit = SeasonalFoliage.HasFruit(source?.ChunkLabel);
             if (Foliage != FoliageKind.None) group?.KeepSpritesEncoded();
         }
 
@@ -187,7 +191,7 @@ namespace FSO.LotView.Utils
                         foreach (var dgrpSprite in image.Sprites)
                         {
                             if (dgrpSprite == null) continue;
-                            var texture = (look != FoliageLook.Normal ? SeasonalSprites.Get(world.Device, dgrpSprite, look) : null)
+                            var texture = (look != FoliageLook.Normal ? SeasonalSprites.Get(world.Device, dgrpSprite, look, FoliageLeafType, FoliageFruit) : null)
                                 ?? world._2D.GetWorldTexture(dgrpSprite);
                             if (texture.Pixel == null) { continue; }
 

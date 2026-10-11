@@ -20,7 +20,7 @@ namespace FSO.LotView.Utils
         public static int Built, NoFrame, NoPixels, Requests;
         public static string LastFailure = "";
 
-        public static WorldTexture? Get(GraphicsDevice device, DGRPSprite sprite, FoliageLook look)
+        public static WorldTexture? Get(GraphicsDevice device, DGRPSprite sprite, FoliageLook look, FoliageLeaf leaf = FoliageLeaf.Green, bool fruit = false)
         {
             Requests++;
             var frame = sprite.GetFrame();
@@ -39,14 +39,29 @@ namespace FSO.LotView.Utils
                 var w = frame.Width;
                 var h = frame.Height;
                 var px = new Color[w * h];
-                for (int y = 0; y < h; y++)
+                if (look == FoliageLook.Frosted)
                 {
-                    for (int x = 0; x < w; x++)
+                    //frost looks at the neighbouring pixels, so it works on the whole sprite
+                    var rgba = new byte[w * h * 4];
+                    for (int i = 0; i < w * h; i++)
                     {
-                        var c = src[y * w + x];
-                        byte r = c.R, g = c.G, b = c.B, a = c.A;
-                        SeasonalFoliage.Recolor(ref r, ref g, ref b, ref a, look, x, y);
-                        px[y * w + x] = new Color(r, g, b, a);
+                        var c = src[i];
+                        rgba[i * 4] = c.R; rgba[i * 4 + 1] = c.G; rgba[i * 4 + 2] = c.B; rgba[i * 4 + 3] = c.A;
+                    }
+                    SeasonalFoliage.Frost(rgba, w, h);
+                    for (int i = 0; i < w * h; i++) px[i] = new Color(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2], rgba[i * 4 + 3]);
+                }
+                else
+                {
+                    for (int y = 0; y < h; y++)
+                    {
+                        for (int x = 0; x < w; x++)
+                        {
+                            var c = src[y * w + x];
+                            byte r = c.R, g = c.G, b = c.B, a = c.A;
+                            SeasonalFoliage.Recolor(ref r, ref g, ref b, ref a, look, x, y, leaf, fruit);
+                            px[y * w + x] = new Color(r, g, b, a);
+                        }
                     }
                 }
                 tex = new Texture2D(device, w, h, false, SurfaceFormat.Color);

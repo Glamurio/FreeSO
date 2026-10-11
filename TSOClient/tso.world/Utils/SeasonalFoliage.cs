@@ -13,6 +13,16 @@ namespace FSO.LotView.Utils
         Evergreen
     }
 
+    /// <summary>Which pixels of a sprite count as leaves.</summary>
+    public enum FoliageLeaf
+    {
+        Green = 0,
+        /// <summary>Crimson leaves (the prune tree).</summary>
+        Red,
+        /// <summary>Green leaves with pink flowers that go with the leaves (crape myrtle).</summary>
+        GreenAndPink
+    }
+
     public enum FoliageLook
     {
         Normal = 0,
@@ -32,21 +42,72 @@ namespace FSO.LotView.Utils
     /// </summary>
     public static class SeasonalFoliage
     {
-        private static readonly string[] Evergreens = { "pine", "fir", "spruce", "palm", "cypress", "orange", "hedge", "round", "bamboo" };
-        private static readonly string[] Blossoming = { "apple", "cherry", "prune", "crape" };
-        //not recoloured: the pack's own autumn/dead trees, plants of water and beach, the topiary
-        private static readonly string[] Skipped = { "spellbound", "snowy", "beach", "lily", "cat tails", "gypsy", "fame", "bush - autumn" };
+        private static readonly string[] Evergreens = { "pine", "fir", "spruce", "palm", "cypress", "hedge", "round", "bamboo", "spellbound", "gypsy", "bush - autumn" };
+        private static readonly string[] Blossoming = { "apple", "cherry", "prune", "orange" };
+        //desert plants and the water plants do not change with the seasons
+        private static readonly string[] Skipped = { "lily", "cat tails", "cactus", "prickly", "agave", "joshua", "saguaro" };
+        //fruit trees: the fruit goes in winter and spring
+        private static readonly string[] Fruiting = { "apple", "orange" };
+
+        //Sims Online objects that are not in the Sims 1 files, by GUID (FSO's VMLotTerrainRestoreTools names them)
+        private static readonly System.Collections.Generic.Dictionary<uint, FoliageKind> ByGuid = new System.Collections.Generic.Dictionary<uint, FoliageKind>
+        {
+            { 0x70E7B9A5, FoliageKind.None }, //prickly pear
+            { 0xD297087F, FoliageKind.None }, //agave bloom
+            { 0x2FF38F53, FoliageKind.None }, //cactus
+            { 0xD8F649FF, FoliageKind.None }, //joshua tree
+            { 0x56040A7B, FoliageKind.None }, //pine with snow
+            { 0x563504AC, FoliageKind.None }, //fir with snow
+            { 0x56D56301, FoliageKind.None }, //spruce with snow
+            { 0x154522AF, FoliageKind.Evergreen }, //juniper bush
+            { 0x15460FCA, FoliageKind.Evergreen }, //sword fern
+            { 0xD5CA5425, FoliageKind.Evergreen }, //rose bush
+            { 0x2163F6F7, FoliageKind.Evergreen }, //tumbleweed
+            { 0x263FAA5F, FoliageKind.Evergreen }, //century plant
+            { 0x65627AE4, FoliageKind.Evergreen }, //small palm
+            { 0x6779ED37, FoliageKind.Evergreen }, //palm 12 foot
+        };
 
         /// <summary>Classifies an object by the label of its OBJD ("Trees - Apple Front", "Shrub - Rose Bush", ...).</summary>
         public static FoliageKind Classify(string label)
         {
             if (string.IsNullOrEmpty(label)) return FoliageKind.None;
             var l = label.ToLowerInvariant();
-            if (!(l.StartsWith("trees - ") || l.StartsWith("tree - ") || l.StartsWith("shrub - "))) return FoliageKind.None;
+            //the Tree of Paradise is a street lamp built from a tree
+            bool lampTree = l.StartsWith("lamps - street - tree");
+            if (!(lampTree || l.StartsWith("trees - ") || l.StartsWith("tree - ") || l.StartsWith("shrub - "))) return FoliageKind.None;
             foreach (var s in Skipped) if (l.Contains(s)) return FoliageKind.None;
+            if (lampTree) return FoliageKind.Deciduous;
             foreach (var s in Evergreens) if (l.Contains(s)) return FoliageKind.Evergreen;
             foreach (var s in Blossoming) if (l.Contains(s)) return FoliageKind.Blossom;
+            //every other shrub keeps its leaves (rose bush, juniper, sword fern, tumbleweed...)
+            if (l.StartsWith("shrub - ")) return FoliageKind.Evergreen;
             return FoliageKind.Deciduous;
+        }
+
+        /// <summary>As Classify, but known GUIDs (objects outside the Sims 1 files) take priority over the label.</summary>
+        public static FoliageKind Classify(string label, uint guid)
+        {
+            if (guid != 0 && ByGuid.TryGetValue(guid, out var kind)) return kind;
+            return Classify(label);
+        }
+
+        public static FoliageLeaf LeafOf(string label)
+        {
+            if (string.IsNullOrEmpty(label)) return FoliageLeaf.Green;
+            var l = label.ToLowerInvariant();
+            if (l.Contains("prune")) return FoliageLeaf.Red;
+            //the crape myrtle tiles are labelled "Trees - Oak - ..." in TreesHD.iff
+            if (l.Contains("crape") || l.Contains("oak")) return FoliageLeaf.GreenAndPink;
+            return FoliageLeaf.Green;
+        }
+
+        public static bool HasFruit(string label)
+        {
+            if (string.IsNullOrEmpty(label)) return false;
+            var l = label.ToLowerInvariant();
+            foreach (var s in Fruiting) if (l.Contains(s)) return true;
+            return false;
         }
 
         /// <summary>The look of a kind of foliage in a season (0 spring, 1 summer, 2 autumn, 3 winter; anything else is normal).</summary>
@@ -68,8 +129,28 @@ namespace FSO.LotView.Utils
             return g > r && g > b && g - Math.Min(r, b) >= 10;
         }
 
+        /// <summary>Crimson leaves (the prune tree): red leads clearly over both other channels, which bark and shadow do not.</summary>
+        public static bool IsRedLeaf(byte r, byte g, byte b)
+        {
+            return r >= 45 && r >= g * 1.5f && r >= b * 1.25f;
+        }
+
+        /// <summary>Pink or red flowers (crape myrtle blooms, apple blossom): bright, saturated, and red or pink rather than brown.</summary>
+        public static bool IsFlower(byte r, byte g, byte b)
+        {
+            return r >= 100 && r >= g * 1.45f && b >= g * 0.75f && r >= b;
+        }
+
+        /// <summary>Apples are red, oranges orange. Bark is orange-brown too, but darker, so oranges need a high value.</summary>
+        public static bool IsFruit(byte r, byte g, byte b)
+        {
+            bool red = r >= 80 && r >= g * 2f && r >= b * 1.8f;
+            bool orange = r >= 165 && g >= 85 && g <= 175 && b <= 70 && r >= g * 1.3f;
+            return red || orange;
+        }
+
         /// <summary>Share of a deciduous crown's leaf pixels kept as twigs in winter.</summary>
-        public const int BareKeepPercent = 42;
+        public const int BareKeepPercent = 48;
 
         private static uint Hash(int x, int y, int salt)
         {
@@ -78,20 +159,37 @@ namespace FSO.LotView.Utils
             return h;
         }
 
-        /// <summary>Recolours one pixel. Pixels that are not leaves, and the Normal look, are returned unchanged.</summary>
+        /// <summary>Recolours one pixel of a Green-leafed tree without fruit.</summary>
         public static void Recolor(ref byte r, ref byte g, ref byte b, ref byte a, FoliageLook look, int x, int y)
         {
-            if (look == FoliageLook.Normal || a == 0 || !IsLeaf(r, g, b)) return;
+            Recolor(ref r, ref g, ref b, ref a, look, x, y, FoliageLeaf.Green, false);
+        }
+
+        /// <summary>
+        /// Recolours one pixel. Pixels that are not leaves (or flowers, or fruit where it applies), and the Normal and Frosted
+        /// looks, are returned unchanged: frost needs the neighbouring pixels, see Frost.
+        /// </summary>
+        public static void Recolor(ref byte r, ref byte g, ref byte b, ref byte a, FoliageLook look, int x, int y, FoliageLeaf leafType, bool fruit)
+        {
+            if (look == FoliageLook.Normal || look == FoliageLook.Frosted || a == 0) return;
+
+            bool leaf = leafType == FoliageLeaf.Red ? IsRedLeaf(r, g, b) : IsLeaf(r, g, b);
+            bool flower = leafType == FoliageLeaf.GreenAndPink && !leaf && IsFlower(r, g, b);
+            bool isFruit = fruit && !leaf && IsFruit(r, g, b);
+            if (!leaf && !flower && !isFruit) return;
             float v = Math.Max(r, Math.Max(g, b)) / 255f;
+
             switch (look)
             {
                 case FoliageLook.Bare:
                     {
+                        //fruit and flowers go with the leaves
+                        if (isFruit) { a = 0; r = g = b = 0; return; }
                         //a bare crown is not empty: keep a share of the leaf pixels as twig and branch texture so the
                         //silhouette stays readable, and dust a few with snow. Removing every leaf pixel left the
                         //trees looking half transparent (the sprites have little bark of their own).
                         uint hh = Hash(x, y, 5) % 100;
-                        if (hh >= BareKeepPercent) { a = 0; r = g = b = 0; return; }
+                        if (hh >= BareKeepPercent || flower) { a = 0; r = g = b = 0; return; }
                         if (hh % 6 == 0) { r = 226; g = 229; b = 236; }
                         else
                         {
@@ -103,38 +201,136 @@ namespace FSO.LotView.Utils
                         a = 255;
                         return;
                     }
-                case FoliageLook.Frosted:
-                    if ((Hash(x >> 1, y >> 1, 1) & 3) == 0) Lerp(ref r, ref g, ref b, 236, 242, 250, 0.72f);
-                    else Lerp(ref r, ref g, ref b, 120, 140, 150, 0.22f);
-                    return;
                 case FoliageLook.Autumn:
                     {
-                        //leaves turn in patches of 4x4 pixels so the tree reads as clusters, not noise
+                        //leaves turn in patches of 4x4 pixels so the tree reads as clusters, not noise; flowers turn with them
                         float[] hues = { 52f, 42f, 28f, 14f, 22f };
                         float[] sats = { 0.85f, 0.88f, 0.9f, 0.88f, 0.7f };
                         int c = (int)(Hash(x >> 2, y >> 2, 2) % 5);
-                        FromHsv(hues[c], sats[c], Math.Min(1f, v * 1.25f + 0.1f), out r, out g, out b);
+                        if (isFruit) return; //fruit hangs on in autumn
+                        FromHsv(hues[c], sats[c], Math.Min(1f, (flower ? 0.55f : v) * 1.25f + 0.1f), out r, out g, out b);
                         return;
                     }
                 case FoliageLook.Blossom:
-                    if (Hash(x >> 1, y >> 1, 3) % 100 < 45)
-                    {
-                        bool white = (Hash(x >> 2, y >> 2, 4) & 1) == 0;
-                        float shade = 0.82f + 0.18f * Math.Min(1f, v * 1.6f);
-                        r = (byte)(255 * shade);
-                        g = (byte)((white ? 238 : 190) * shade);
-                        b = (byte)((white ? 242 : 212) * shade);
-                        return;
-                    }
-                    goto case FoliageLook.Spring;
                 case FoliageLook.Spring:
                     {
+                        if (flower) return; //crape myrtle keeps its own flowers
+                        if (isFruit) { FromHsv(95f, 0.55f, 0.45f, out r, out g, out b); return; }
+                        if (look == FoliageLook.Blossom)
+                        {
+                            //small clusters of blossom: each 4x4 cell has a 42% chance of one, a few pixels around a jittered centre
+                            int cx = x >> 2, cy = y >> 2;
+                            if (Hash(cx, cy, 3) % 100 < 42)
+                            {
+                                uint j = Hash(cx, cy, 5);
+                                int jx = cx * 4 + 1 + (int)(j & 1), jy = cy * 4 + 1 + (int)((j >> 1) & 1);
+                                int d2 = (x - jx) * (x - jx) + (y - jy) * (y - jy);
+                                if (d2 <= 2)
+                                {
+                                    uint pal = Hash(cx, cy, 4) % 3;
+                                    int pr = pal == 0 ? 255 : (pal == 1 ? 252 : 240);
+                                    int pg = pal == 0 ? 214 : (pal == 1 ? 244 : 160);
+                                    int pb = pal == 0 ? 226 : (pal == 1 ? 246 : 190);
+                                    float shade = 0.80f + 0.20f * Math.Min(1f, v * 1.6f);
+                                    if (d2 == 0) shade = Math.Min(1f, shade + 0.12f);
+                                    r = (byte)Math.Min(255, (int)(pr * shade));
+                                    g = (byte)Math.Min(255, (int)(pg * shade));
+                                    b = (byte)Math.Min(255, (int)(pb * shade));
+                                    return;
+                                }
+                            }
+                        }
+                        if (leafType == FoliageLeaf.Red)
+                        {
+                            //crimson leaves are green again in spring
+                            FromHsv(95f, 0.55f, Math.Min(1f, v + 0.05f), out r, out g, out b);
+                            return;
+                        }
                         //fresher: pull the hue towards yellow-green and lighten
                         RgbToHsv(r, g, b, out float h, out float s, out float val);
                         h = h + (86f - h) * 0.4f;
                         FromHsv(h, s * 0.92f, Math.Min(1f, val * 1.18f + 0.04f), out r, out g, out b);
                         return;
                     }
+            }
+        }
+
+        /// <summary>
+        /// Winter snow for evergreens and other plants that keep their shape, on a whole sprite (RGBA, 4 bytes a pixel, alpha 0 =
+        /// empty). Snow settles where the sprite faces up: along the upper edge of every clump, on pixels brighter than their
+        /// surroundings (lit from above), and in the upper part of the sprite. Everything else is cooled a little. Pixel by pixel
+        /// randomness made a speckle that looked wrong on dense shrubs, so the noise here comes in 2x2 blocks.
+        /// </summary>
+        public static void Frost(byte[] rgba, int w, int h)
+        {
+            if (rgba == null || w <= 0 || h <= 0 || rgba.Length < w * h * 4) return;
+            var lum = new float[w * h];
+            int top = -1, bottom = -1;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int i = (y * w + x) * 4;
+                    if (rgba[i + 3] == 0) continue;
+                    lum[y * w + x] = 0.299f * rgba[i] + 0.587f * rgba[i + 1] + 0.114f * rgba[i + 2];
+                    if (top < 0) top = y;
+                    bottom = y;
+                }
+            }
+            if (top < 0) return;
+            float span = Math.Max(1, bottom - top);
+            var snow = new bool[w * h];
+            for (int y = top; y <= bottom; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int p = y * w + x;
+                    if (rgba[p * 4 + 3] == 0) continue;
+                    //rows of solid pixels above this one, up to 5
+                    int d = 5;
+                    for (int k = 1; k <= 5; k++)
+                    {
+                        if (y - k < 0 || rgba[((y - k) * w + x) * 4 + 3] == 0) { d = k - 1; break; }
+                    }
+                    float sum = 0; int n = 0;
+                    for (int dy = -2; dy <= 2; dy++)
+                    {
+                        int yy = y + dy; if (yy < 0 || yy >= h) continue;
+                        for (int dx = -2; dx <= 2; dx++)
+                        {
+                            int xx = x + dx; if (xx < 0 || xx >= w) continue;
+                            if (rgba[(yy * w + xx) * 4 + 3] == 0) continue;
+                            sum += lum[yy * w + xx]; n++;
+                        }
+                    }
+                    float mean = n > 0 ? sum / n : lum[p];
+                    float edge = Math.Max(0f, 1f - d / 5f) * 0.8f;
+                    float bright = Math.Max(0f, Math.Min(1f, (lum[p] - mean) / 36f)) * 0.5f;
+                    float upper = Math.Max(0f, (1f - (y - top) / span) - 0.35f) * 0.9f;
+                    float noise = (Hash(x >> 1, y >> 1, 7) % 100) / 100f * 0.35f;
+                    snow[p] = edge + bright + upper + noise > 0.66f;
+                }
+            }
+            for (int y = top; y <= bottom; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int p = y * w + x;
+                    int i = p * 4;
+                    if (rgba[i + 3] == 0) continue;
+                    if (snow[p])
+                    {
+                        float shade = 0.80f + 0.20f * Math.Min(1f, lum[p] / 150f);
+                        rgba[i] = (byte)(236 * shade); rgba[i + 1] = (byte)(242 * shade); rgba[i + 2] = (byte)(250 * shade);
+                    }
+                    else
+                    {
+                        //a cold cast on what the snow does not cover
+                        rgba[i] = (byte)(rgba[i] + (112 - rgba[i]) * 0.14f);
+                        rgba[i + 1] = (byte)(rgba[i + 1] + (128 - rgba[i + 1]) * 0.14f);
+                        rgba[i + 2] = (byte)(rgba[i + 2] + (138 - rgba[i + 2]) * 0.14f);
+                    }
+                }
             }
         }
 
