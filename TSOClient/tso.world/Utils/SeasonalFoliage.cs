@@ -255,62 +255,64 @@ namespace FSO.LotView.Utils
             }
         }
 
+        /// <summary>Share of an evergreen sprite's pixels covered by snow. Measured on the game's own snow variants (the large fir,
+        /// pine and spruce, and the snowy shrubs): about a third of a tree's pixels, half of a shrub's.</summary>
+        public const float FrostCoverage = 0.36f;
+
         /// <summary>
         /// Winter snow for evergreens and other plants that keep their shape, on a whole sprite (RGBA, 4 bytes a pixel, alpha 0 =
-        /// empty). Snow settles where the sprite faces up: along the upper edge of every clump, on pixels brighter than their
-        /// surroundings (lit from above), and in the upper part of the sprite. Everything else is cooled a little. Pixel by pixel
-        /// randomness made a speckle that looked wrong on dense shrubs, so the noise here comes in 2x2 blocks.
+        /// empty). Snow is built from rounded lumps (3-6 pixels wide, 2-4 high) laid along the upper edges of the sprite first,
+        /// then lower, until FrostCoverage of the pixels are covered. A lump is bright on top and grey underneath, like the snow
+        /// in the game's own snowy trees. Only pixels that already exist are painted, so the outline and the z-buffer still match.
+        /// What the snow does not cover gets a slight cold cast.
         /// </summary>
         public static void Frost(byte[] rgba, int w, int h)
         {
             if (rgba == null || w <= 0 || h <= 0 || rgba.Length < w * h * 4) return;
-            var lum = new float[w * h];
-            int top = -1, bottom = -1;
+            int top = -1, bottom = -1, total = 0;
             for (int y = 0; y < h; y++)
             {
                 for (int x = 0; x < w; x++)
                 {
-                    int i = (y * w + x) * 4;
-                    if (rgba[i + 3] == 0) continue;
-                    lum[y * w + x] = 0.299f * rgba[i] + 0.587f * rgba[i + 1] + 0.114f * rgba[i + 2];
+                    if (rgba[(y * w + x) * 4 + 3] == 0) continue;
+                    total++;
                     if (top < 0) top = y;
                     bottom = y;
                 }
             }
             if (top < 0) return;
             float span = Math.Max(1, bottom - top);
-            var snow = new bool[w * h];
-            for (int y = top; y <= bottom; y++)
+            int target = (int)(total * FrostCoverage);
+            var snow = new float[w * h];
+            for (int i = 0; i < snow.Length; i++) snow[i] = -1f;
+            int count = 0;
+
+            for (int pass = 0; pass < 3 && count < target; pass++)
             {
-                for (int x = 0; x < w; x++)
+                for (int y = top; y <= bottom && count < target; y++)
                 {
-                    int p = y * w + x;
-                    if (rgba[p * 4 + 3] == 0) continue;
-                    //rows of solid pixels above this one, up to 5
-                    int d = 5;
-                    for (int k = 1; k <= 5; k++)
+                    for (int x = 0; x < w && count < target; x++)
                     {
-                        if (y - k < 0 || rgba[((y - k) * w + x) * 4 + 3] == 0) { d = k - 1; break; }
-                    }
-                    float sum = 0; int n = 0;
-                    for (int dy = -2; dy <= 2; dy++)
-                    {
-                        int yy = y + dy; if (yy < 0 || yy >= h) continue;
-                        for (int dx = -2; dx <= 2; dx++)
+                        int p = y * w + x;
+                        if (rgba[p * 4 + 3] == 0 || snow[p] >= 0f) continue;
+                        //rows of solid pixels above this one, up to 5
+                        int d = 5;
+                        for (int k = 1; k <= 5; k++)
                         {
-                            int xx = x + dx; if (xx < 0 || xx >= w) continue;
-                            if (rgba[(yy * w + xx) * 4 + 3] == 0) continue;
-                            sum += lum[yy * w + xx]; n++;
+                            if (y - k < 0 || rgba[((y - k) * w + x) * 4 + 3] == 0) { d = k - 1; break; }
                         }
+                        uint hv = Hash(x, y, 11) % 100;
+                        float upper = 1f - (y - top) / span;
+                        bool seed = pass == 0 ? (d == 0 && hv < 55)
+                                  : pass == 1 ? (d <= 2 && hv < 25 + upper * 50)
+                                  : (hv < 20 + upper * 30);
+                        if (!seed) continue;
+                        int rx = 3 + (int)(Hash(x, y, 12) % 4), ry = 2 + (int)(Hash(x, y, 13) % 3);
+                        count += StampSnow(rgba, snow, w, h, x, y, rx, ry);
                     }
-                    float mean = n > 0 ? sum / n : lum[p];
-                    float edge = Math.Max(0f, 1f - d / 5f) * 0.8f;
-                    float bright = Math.Max(0f, Math.Min(1f, (lum[p] - mean) / 36f)) * 0.5f;
-                    float upper = Math.Max(0f, (1f - (y - top) / span) - 0.35f) * 0.9f;
-                    float noise = (Hash(x >> 1, y >> 1, 7) % 100) / 100f * 0.35f;
-                    snow[p] = edge + bright + upper + noise > 0.66f;
                 }
             }
+
             for (int y = top; y <= bottom; y++)
             {
                 for (int x = 0; x < w; x++)
@@ -318,10 +320,12 @@ namespace FSO.LotView.Utils
                     int p = y * w + x;
                     int i = p * 4;
                     if (rgba[i + 3] == 0) continue;
-                    if (snow[p])
+                    if (snow[p] >= 0f)
                     {
-                        float shade = 0.80f + 0.20f * Math.Min(1f, lum[p] / 150f);
-                        rgba[i] = (byte)(236 * shade); rgba[i + 1] = (byte)(242 * shade); rgba[i + 2] = (byte)(250 * shade);
+                        float v = 160f + 94f * snow[p];
+                        rgba[i] = (byte)Math.Min(255f, v);
+                        rgba[i + 1] = (byte)Math.Min(255f, v * 1.02f + 1f);
+                        rgba[i + 2] = (byte)Math.Min(255f, v * 1.03f + 1f);
                     }
                     else
                     {
@@ -334,9 +338,28 @@ namespace FSO.LotView.Utils
             }
         }
 
-        private static void Lerp(ref byte r, ref byte g, ref byte b, int tr, int tg, int tb, float t)
+        /// <summary>Lays one lump of snow whose top touches (cx, cy). Returns how many pixels were newly covered.</summary>
+        private static int StampSnow(byte[] rgba, float[] snow, int w, int h, int cx, int cy, int rx, int ry)
         {
-            r = (byte)(r + (tr - r) * t); g = (byte)(g + (tg - g) * t); b = (byte)(b + (tb - b) * t);
+            int added = 0;
+            for (int dy = 0; dy <= 2 * ry; dy++)
+            {
+                for (int dx = -rx; dx <= rx; dx++)
+                {
+                    float nx = dx / (rx + 0.5f), ny = (dy - ry) / (ry + 0.5f);
+                    if (nx * nx + ny * ny > 1f) continue;
+                    int x = cx + dx, y = cy + dy;
+                    if (x < 0 || x >= w || y < 0 || y >= h) continue;
+                    int p = y * w + x;
+                    if (rgba[p * 4 + 3] == 0) continue;
+                    //bright on top, grey underneath
+                    float t = 1f - (float)Math.Pow((ny + 1f) / 2f, 1.4f);
+                    t = Math.Max(0f, Math.Min(1f, t * 1.15f - 0.12f * nx));
+                    if (snow[p] < 0f) { snow[p] = t; added++; }
+                    else if (snow[p] < t) snow[p] = t;
+                }
+            }
+            return added;
         }
 
         public static void RgbToHsv(byte r, byte g, byte b, out float h, out float s, out float v)
