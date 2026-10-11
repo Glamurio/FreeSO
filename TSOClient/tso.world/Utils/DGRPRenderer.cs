@@ -8,6 +8,7 @@ using Microsoft.Xna.Framework.Graphics;
 using FSO.Files.RC;
 using FSO.LotView.Effects;
 using FSO.Common.Utils;
+using FSO.Files.Utils;
 
 namespace FSO.LotView.Utils
 {
