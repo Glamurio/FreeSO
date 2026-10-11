@@ -68,6 +68,9 @@ namespace FSO.LotView.Utils
             return g > r && g > b && g - Math.Min(r, b) >= 10;
         }
 
+        /// <summary>Share of a deciduous crown's leaf pixels kept as twigs in winter.</summary>
+        public const int BareKeepPercent = 42;
+
         private static uint Hash(int x, int y, int salt)
         {
             uint h = (uint)(x * 73856093) ^ (uint)(y * 19349663) ^ (uint)(salt * 83492791);
@@ -83,8 +86,23 @@ namespace FSO.LotView.Utils
             switch (look)
             {
                 case FoliageLook.Bare:
-                    a = 0; r = g = b = 0;
-                    return;
+                    {
+                        //a bare crown is not empty: keep a share of the leaf pixels as twig and branch texture so the
+                        //silhouette stays readable, and dust a few with snow. Removing every leaf pixel left the
+                        //trees looking half transparent (the sprites have little bark of their own).
+                        uint hh = Hash(x, y, 5) % 100;
+                        if (hh >= BareKeepPercent) { a = 0; r = g = b = 0; return; }
+                        if (hh % 6 == 0) { r = 226; g = 229; b = 236; }
+                        else
+                        {
+                            float k = 0.7f + 0.7f * v;
+                            r = (byte)Math.Min(255, (int)(96 * k));
+                            g = (byte)Math.Min(255, (int)(82 * k));
+                            b = (byte)Math.Min(255, (int)(72 * k));
+                        }
+                        a = 255;
+                        return;
+                    }
                 case FoliageLook.Frosted:
                     if ((Hash(x >> 1, y >> 1, 1) & 3) == 0) Lerp(ref r, ref g, ref b, 236, 242, 250, 0.72f);
                     else Lerp(ref r, ref g, ref b, 120, 140, 150, 0.22f);
