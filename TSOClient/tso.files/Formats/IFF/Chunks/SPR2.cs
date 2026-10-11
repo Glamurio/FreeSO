@@ -205,6 +205,8 @@ namespace FSO.Files.Formats.IFF.Chunks
         private SPR2 Parent;
         private uint Version;
         private byte[] ToDecode;
+        /// <summary>Keep the compressed data after decoding (see DGRP.KeepSpritesEncoded).</summary>
+        public bool KeepEncoded;
         private PALT Palette;
         public bool Decoded
         {
@@ -311,7 +313,7 @@ namespace FSO.Files.Formats.IFF.Chunks
                         ReadDeferred(Version, buf);
                     }
 
-                    if (TimedReferenceController.CurrentType == CacheType.PERMANENT) ToDecode = null;
+                    if (TimedReferenceController.CurrentType == CacheType.PERMANENT && !KeepEncoded) ToDecode = null;
 
                     Interlocked.Exchange(ref _decoding, 0);
                 }

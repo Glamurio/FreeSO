@@ -16,6 +16,24 @@ namespace FSO.Files.Formats.IFF.Chunks
     {
         public DGRPImage[] Images { get; set; }
 
+        private bool KeepEncodedMarked;
+
+        /// <summary>
+        /// Asks every sprite of this group to keep its compressed data after decoding, so its colours can be recoloured later
+        /// (seasonal foliage). Under the permanent cache the compressed data is otherwise dropped once a sprite is decoded,
+        /// and the decoded pixels once they are on the GPU. Must run before the sprites are first drawn.
+        /// </summary>
+        public void KeepSpritesEncoded()
+        {
+            if (KeepEncodedMarked || Images == null) return;
+            KeepEncodedMarked = true;
+            foreach (var image in Images)
+            {
+                if (image?.Sprites == null) continue;
+                foreach (var sprite in image.Sprites) { var f = sprite?.GetFrame(); if (f != null) f.KeepEncoded = true; }
+            }
+        }
+
         /// <summary>
         /// Gets a DGRPImage instance from this DGRP instance.
         /// </summary>

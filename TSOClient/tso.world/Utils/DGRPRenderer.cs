@@ -50,6 +50,7 @@ namespace FSO.LotView.Utils
             this.DrawGroup = group;
             this.Source = source;
             Foliage = SeasonalFoliage.Classify(source?.ChunkLabel);
+            if (Foliage != FoliageKind.None) group?.KeepSpritesEncoded();
         }
 
         /// <summary>Makes the next ValidateSprite rebuild the sprites if the world's season changed their look.</summary>
