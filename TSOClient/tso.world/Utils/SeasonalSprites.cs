@@ -8,6 +8,20 @@ using System.Runtime.CompilerServices;
 
 namespace FSO.LotView.Utils
 {
+    /// <summary>What a seasonal sprite needs to know beyond its own pixels: where it is drawn and which tree it belongs to.</summary>
+    public sealed class SeasonalContext
+    {
+        /// <summary>3 near, 2 medium, 1 far.</summary>
+        public int Zoom = 3;
+        /// <summary>The DGRP image direction the sprite was taken from (1, 4, 16 or 64).</summary>
+        public uint Direction = 1;
+        /// <summary>A tree rather than a shrub (picks the snow lumps cut from trees).</summary>
+        public bool Tree;
+        /// <summary>For the leafless look: the whole tree and this sprite's tile of it. Null: the per-pixel recolour is used.</summary>
+        public BareTreeGroup Bare;
+        public OBJD Tile;
+    }
+
     /// <summary>
     /// Builds the recoloured textures for seasonal foliage (see SeasonalFoliage). One texture per sprite and look, made the
     /// first time it is drawn and kept for as long as the sprite exists. Falls back to null (draw the original) if the sprite
@@ -21,39 +35,67 @@ namespace FSO.LotView.Utils
         public static int Built, NoFrame, NoPixels, Requests;
         public static string LastFailure = "";
 
-        public static WorldTexture? Get(GraphicsDevice device, DGRPSprite sprite, FoliageLook look, FoliageLeaf leaf = FoliageLeaf.Green, bool fruit = false)
+        private static readonly ConditionalWeakTable<DGRPSprite, Texture2D[]> ZCache = new ConditionalWeakTable<DGRPSprite, Texture2D[]>();
+        private static readonly ConditionalWeakTable<DGRPSprite, object> NoSnow = new ConditionalWeakTable<DGRPSprite, object>();
+        private static readonly object NoSnowMarker = new object();
+
+        /// <summary>Counters for season_info: sprites given transplanted snow, and leafless trees drawn from a branch skeleton.</summary>
+        public static int Snowed, Branched;
+
+        public static WorldTexture? Get(GraphicsDevice device, DGRPSprite sprite, FoliageLook look, FoliageLeaf leaf = FoliageLeaf.Green, bool fruit = false,
+            SeasonalContext context = null)
         {
             Requests++;
             var frame = sprite.GetFrame();
             if (frame == null) { NoFrame++; return null; }
 
-            //the z-buffer is the original's: only the colours change
             var original = frame.GetWorldTexture(device);
             if (original.Pixel == null) return null;
 
             var textures = Cache.GetValue(sprite, s => new Texture2D[6]);
+            var zTextures = ZCache.GetValue(sprite, s => new Texture2D[6]);
             var tex = textures[(int)look];
-            if (tex == null || tex.IsDisposed)
+            if (look == FoliageLook.Frosted && NoSnow.TryGetValue(sprite, out var _)) return null;
+            if (tex == null || tex.IsDisposed || (look == FoliageLook.Frosted && (zTextures[(int)look]?.IsDisposed ?? true)))
             {
                 var src = frame.GetPixelsForRecolor();
                 if (src == null || frame.Width <= 0 || frame.Height <= 0 || src.Length < frame.Width * frame.Height) { NoPixels++; LastFailure = frame.DescribeState() + (src == null ? ", nothing decoded" : ", decoded " + src.Length); return null; }
                 var w = frame.Width;
                 var h = frame.Height;
-                var px = new Color[w * h];
+                Color[] px;
+                Texture2D zTex = null;
                 if (look == FoliageLook.Frosted)
                 {
-                    //frost looks at the neighbouring pixels, so it works on the whole sprite
+                    //snow lumps from the game's own snowy plants; they stick up above the sprite, so it grows and gets its own z-buffer
+                    if (!SnowLumps.Apply(src, frame.GetZForRecolor(), w, h, context?.Zoom ?? 3, context?.Tree ?? false, out px, out var z, out var h2))
+                    {
+                        //nothing to settle on (or no snowy plants installed): remember, so redraws do not decode it again
+                        if (SnowLumps.HasLibrary(context?.Tree ?? false, context?.Zoom ?? 3)) NoSnow.AddOrUpdate(sprite, NoSnowMarker);
+                        return null;
+                    }
+                    h = h2;
+                    zTex = new Texture2D(device, w, h, false, SurfaceFormat.Alpha8);
+                    zTex.SetData(z);
+                    Snowed++;
+                }
+                else if (look == FoliageLook.Bare && context?.Bare != null)
+                {
+                    //a leafless branch network grown from the tree's own trunk (BareBranches); the outline only shrinks
                     var rgba = new byte[w * h * 4];
                     for (int i = 0; i < w * h; i++)
                     {
                         var c = src[i];
                         rgba[i * 4] = c.R; rgba[i * 4 + 1] = c.G; rgba[i * 4 + 2] = c.B; rgba[i * 4 + 3] = c.A;
                     }
-                    SeasonalFoliage.Frost(rgba, w, h);
+                    context.Bare.FramePosition(context.Tile, sprite, h, context.Direction, context.Zoom, out int fx, out int fy);
+                    BareBranches.Apply(context.Bare.SkeletonFor(context.Direction, context.Zoom), rgba, null, w, h, fx, fy, sprite.Flip, leaf, fruit);
+                    px = new Color[w * h];
                     for (int i = 0; i < w * h; i++) px[i] = new Color(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2], rgba[i * 4 + 3]);
+                    Branched++;
                 }
                 else
                 {
+                    px = new Color[w * h];
                     for (int y = 0; y < h; y++)
                     {
                         for (int x = 0; x < w; x++)
@@ -69,9 +111,11 @@ namespace FSO.LotView.Utils
                 tex.SetData(px);
                 tex.Tag = new TextureInfo(tex, w, h);
                 textures[(int)look] = tex;
+                zTextures[(int)look] = zTex;
                 Built++;
             }
-            return new WorldTexture { Pixel = tex, ZBuffer = original.ZBuffer };
+            var zBuffer = zTextures[(int)look];
+            return new WorldTexture { Pixel = tex, ZBuffer = (zBuffer != null && !zBuffer.IsDisposed) ? zBuffer : original.ZBuffer };
         }
 
         private static readonly ConditionalWeakTable<DGRPSprite, Texture2D[]> LitterCache = new ConditionalWeakTable<DGRPSprite, Texture2D[]>();

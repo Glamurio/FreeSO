@@ -127,10 +127,10 @@ namespace FSO.LotView.Utils
         }
 
         /// <summary>
-        /// Evergreens that have no winter sprites of their own can be given generated snow (Frost). Off: the generated snow
-        /// did not look good next to the game's own snowy trees, so those evergreens stay as they are in winter.
+        /// Evergreens that have no winter sprites of their own get snow lumps cut from the game's own snowy plants (SnowLumps).
+        /// Off: they stay as they are in winter.
         /// </summary>
-        public static bool CraftedFrost = false;
+        public static bool SnowOnEvergreens = true;
 
         /// <summary>
         /// Objects whose graphic has a snowy twin in the game's own files (CONFIRMED by DGRP names and pixels): the large
@@ -156,7 +156,7 @@ namespace FSO.LotView.Utils
             {
                 case 0: return kind == FoliageKind.Blossom ? FoliageLook.Blossom : (kind == FoliageKind.Deciduous ? FoliageLook.Spring : FoliageLook.Normal);
                 case 2: return kind == FoliageKind.Evergreen ? FoliageLook.Normal : FoliageLook.Autumn;
-                case 3: return kind == FoliageKind.Evergreen ? (CraftedFrost ? FoliageLook.Frosted : FoliageLook.Normal) : FoliageLook.Bare;
+                case 3: return kind == FoliageKind.Evergreen ? (SnowOnEvergreens ? FoliageLook.Frosted : FoliageLook.Normal) : FoliageLook.Bare;
                 default: return FoliageLook.Normal;
             }
         }
@@ -205,7 +205,7 @@ namespace FSO.LotView.Utils
 
         /// <summary>
         /// Recolours one pixel. Pixels that are not leaves (or flowers, or fruit where it applies), and the Normal and Frosted
-        /// looks, are returned unchanged: frost needs the neighbouring pixels, see Frost.
+        /// looks, are returned unchanged: snow needs the neighbouring pixels, see SnowLumps.
         /// </summary>
         public static void Recolor(ref byte r, ref byte g, ref byte b, ref byte a, FoliageLook look, int x, int y, FoliageLeaf leafType, bool fruit)
         {
@@ -291,113 +291,6 @@ namespace FSO.LotView.Utils
                         return;
                     }
             }
-        }
-
-        /// <summary>Share of an evergreen sprite's pixels covered by snow. Measured on the game's own snow variants (the large fir,
-        /// pine and spruce, and the snowy shrubs): about a third of a tree's pixels, half of a shrub's.</summary>
-        public const float FrostCoverage = 0.36f;
-
-        /// <summary>
-        /// Winter snow for evergreens and other plants that keep their shape, on a whole sprite (RGBA, 4 bytes a pixel, alpha 0 =
-        /// empty). Snow is built from rounded lumps (3-6 pixels wide, 2-4 high) laid along the upper edges of the sprite first,
-        /// then lower, until FrostCoverage of the pixels are covered. A lump is bright on top and grey underneath, like the snow
-        /// in the game's own snowy trees. Only pixels that already exist are painted, so the outline and the z-buffer still match.
-        /// What the snow does not cover gets a slight cold cast.
-        /// </summary>
-        public static void Frost(byte[] rgba, int w, int h)
-        {
-            if (rgba == null || w <= 0 || h <= 0 || rgba.Length < w * h * 4) return;
-            int top = -1, bottom = -1, total = 0;
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    if (rgba[(y * w + x) * 4 + 3] == 0) continue;
-                    total++;
-                    if (top < 0) top = y;
-                    bottom = y;
-                }
-            }
-            if (top < 0) return;
-            float span = Math.Max(1, bottom - top);
-            int target = (int)(total * FrostCoverage);
-            var snow = new float[w * h];
-            for (int i = 0; i < snow.Length; i++) snow[i] = -1f;
-            int count = 0;
-
-            for (int pass = 0; pass < 3 && count < target; pass++)
-            {
-                for (int y = top; y <= bottom && count < target; y++)
-                {
-                    for (int x = 0; x < w && count < target; x++)
-                    {
-                        int p = y * w + x;
-                        if (rgba[p * 4 + 3] == 0 || snow[p] >= 0f) continue;
-                        //rows of solid pixels above this one, up to 5
-                        int d = 5;
-                        for (int k = 1; k <= 5; k++)
-                        {
-                            if (y - k < 0 || rgba[((y - k) * w + x) * 4 + 3] == 0) { d = k - 1; break; }
-                        }
-                        uint hv = Hash(x, y, 11) % 100;
-                        float upper = 1f - (y - top) / span;
-                        bool seed = pass == 0 ? (d == 0 && hv < 55)
-                                  : pass == 1 ? (d <= 2 && hv < 25 + upper * 50)
-                                  : (hv < 20 + upper * 30);
-                        if (!seed) continue;
-                        int rx = 3 + (int)(Hash(x, y, 12) % 4), ry = 2 + (int)(Hash(x, y, 13) % 3);
-                        count += StampSnow(rgba, snow, w, h, x, y, rx, ry);
-                    }
-                }
-            }
-
-            for (int y = top; y <= bottom; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    int p = y * w + x;
-                    int i = p * 4;
-                    if (rgba[i + 3] == 0) continue;
-                    if (snow[p] >= 0f)
-                    {
-                        float v = 160f + 94f * snow[p];
-                        rgba[i] = (byte)Math.Min(255f, v);
-                        rgba[i + 1] = (byte)Math.Min(255f, v * 1.02f + 1f);
-                        rgba[i + 2] = (byte)Math.Min(255f, v * 1.03f + 1f);
-                    }
-                    else
-                    {
-                        //a cold cast on what the snow does not cover
-                        rgba[i] = (byte)(rgba[i] + (112 - rgba[i]) * 0.14f);
-                        rgba[i + 1] = (byte)(rgba[i + 1] + (128 - rgba[i + 1]) * 0.14f);
-                        rgba[i + 2] = (byte)(rgba[i + 2] + (138 - rgba[i + 2]) * 0.14f);
-                    }
-                }
-            }
-        }
-
-        /// <summary>Lays one lump of snow whose top touches (cx, cy). Returns how many pixels were newly covered.</summary>
-        private static int StampSnow(byte[] rgba, float[] snow, int w, int h, int cx, int cy, int rx, int ry)
-        {
-            int added = 0;
-            for (int dy = 0; dy <= 2 * ry; dy++)
-            {
-                for (int dx = -rx; dx <= rx; dx++)
-                {
-                    float nx = dx / (rx + 0.5f), ny = (dy - ry) / (ry + 0.5f);
-                    if (nx * nx + ny * ny > 1f) continue;
-                    int x = cx + dx, y = cy + dy;
-                    if (x < 0 || x >= w || y < 0 || y >= h) continue;
-                    int p = y * w + x;
-                    if (rgba[p * 4 + 3] == 0) continue;
-                    //bright on top, grey underneath
-                    float t = 1f - (float)Math.Pow((ny + 1f) / 2f, 1.4f);
-                    t = Math.Max(0f, Math.Min(1f, t * 1.15f - 0.12f * nx));
-                    if (snow[p] < 0f) { snow[p] = t; added++; }
-                    else if (snow[p] < t) snow[p] = t;
-                }
-            }
-            return added;
         }
 
         public static void RgbToHsv(byte r, byte g, byte b, out float h, out float s, out float v)

@@ -328,19 +328,35 @@ namespace FSO.Files.Formats.IFF.Chunks
         public Color[] GetPixelsForRecolor()
         {
             //decode into a throwaway copy: independent of whatever the texture streaming is doing to PixelData at the moment
-            var data = ToDecode;
-            if (data != null)
-            {
-                var copy = new SPR2Frame(Parent) { Width = Width, Height = Height, Flags = Flags, PaletteID = PaletteID, Version = Version };
-                copy.UpdatePalette();
-                using (var buf = IoBuffer.FromStream(new MemoryStream(data), ByteOrder.LITTLE_ENDIAN))
-                {
-                    copy.ReadDeferred(Version, buf);
-                }
-                if (copy.PixelData != null) return copy.PixelData;
-            }
+            var copy = DecodeCopy();
+            if (copy?.PixelData != null) return copy.PixelData;
             DecodeIfRequired(false);
             return PixelData;
+        }
+
+        /// <summary>
+        /// The decoded z-buffer of this frame (one byte per pixel, 0 near, 255 far), for effects that add pixels and so need
+        /// their own z-buffer (seasonal snow). Null if the frame has none or can no longer be decoded. Must not be modified.
+        /// </summary>
+        public byte[] GetZForRecolor()
+        {
+            var copy = DecodeCopy();
+            if (copy?.ZBufferData != null) return copy.ZBufferData;
+            DecodeIfRequired(true);
+            return ZBufferData;
+        }
+
+        private SPR2Frame DecodeCopy()
+        {
+            var data = ToDecode;
+            if (data == null) return null;
+            var copy = new SPR2Frame(Parent) { Width = Width, Height = Height, Flags = Flags, PaletteID = PaletteID, Version = Version };
+            copy.UpdatePalette();
+            using (var buf = IoBuffer.FromStream(new MemoryStream(data), ByteOrder.LITTLE_ENDIAN))
+            {
+                copy.ReadDeferred(Version, buf);
+            }
+            return copy;
         }
 
         /// <summary>State of the frame for the season_info diagnostic.</summary>

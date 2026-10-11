@@ -50,6 +50,8 @@ namespace FSO.LotView.Utils
         private bool FoliageIsTree;
         /// <summary>The game's own snowy version of this graphic, shown in winter instead of the normal one (null if it has none).</summary>
         public DGRP WinterGroup;
+        /// <summary>For deciduous trees: all tiles of the tree, so winter can grow one branch network across them (null: per-pixel bare look).</summary>
+        public BareTreeGroup BareGroup;
 
         public DGRPRenderer(DGRP group, OBJD source)
         {
@@ -270,10 +272,22 @@ namespace FSO.LotView.Utils
                     int minX = int.MaxValue, minY = int.MaxValue;
                     if (image != null)
                     {
+                        SeasonalContext context = null;
+                        if (look != FoliageLook.Normal && WinterGroup == null)
+                        {
+                            context = new SeasonalContext
+                            {
+                                Zoom = (int)world.Zoom,
+                                Direction = image.Direction,
+                                Tree = FoliageIsTree,
+                                Bare = look == FoliageLook.Bare ? BareGroup : null,
+                                Tile = Source
+                            };
+                        }
                         foreach (var dgrpSprite in image.Sprites)
                         {
                             if (dgrpSprite == null) continue;
-                            var texture = (look != FoliageLook.Normal && WinterGroup == null ? SeasonalSprites.Get(world.Device, dgrpSprite, look, FoliageLeafType, FoliageFruit) : null)
+                            var texture = (context != null ? SeasonalSprites.Get(world.Device, dgrpSprite, look, FoliageLeafType, FoliageFruit, context) : null)
                                 ?? world._2D.GetWorldTexture(dgrpSprite);
                             if (texture.Pixel == null) { continue; }
 

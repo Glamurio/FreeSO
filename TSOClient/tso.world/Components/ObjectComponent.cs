@@ -202,7 +202,17 @@ namespace FSO.LotView.Components
             }
             dgrp = new DGRPRenderer(this.DrawGroup, obj.OBJ);
             if (this.DrawGroup != null && SeasonalFoliage.HasRealWinter(obj.OBJ.GUID))
+            {
                 dgrp.WinterGroup = obj.Resource.Get<DGRP>((ushort)(obj.OBJ.BaseGraphicID + 1));
+                //its lumps are also cut out for other plants' snow (SnowLumps), which needs the encoded sprites
+                dgrp.WinterGroup?.KeepSpritesEncoded();
+            }
+            else if (this.DrawGroup != null && dgrp.Foliage != FoliageKind.None && dgrp.Foliage != FoliageKind.Evergreen
+                && SeasonalFoliage.IsTree(obj.OBJ.ChunkLabel))
+            {
+                var res = obj.Resource;
+                dgrp.BareGroup = BareTreeGroup.For(obj.OBJ, id => res.Get<DGRP>(id), SeasonalFoliage.LeafOf(obj.OBJ.ChunkLabel), SeasonalFoliage.HasFruit(obj.OBJ.ChunkLabel));
+            }
             dgrp.DynamicSpriteBaseID = obj.OBJ.DynamicSpriteBaseId;
             dgrp.NumDynamicSprites = obj.OBJ.NumDynamicSprites;
             InterpolationOwner = this;
