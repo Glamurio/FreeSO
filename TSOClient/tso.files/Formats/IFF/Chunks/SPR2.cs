@@ -325,14 +325,26 @@ namespace FSO.Files.Formats.IFF.Chunks
         /// </summary>
         public Color[] GetPixelsForRecolor()
         {
-            for (int attempt = 0; attempt < 3; attempt++)
+            //decode into a throwaway copy: independent of whatever the texture streaming is doing to PixelData at the moment
+            var data = ToDecode;
+            if (data != null)
             {
-                DecodeIfRequired(false);
-                var px = PixelData;
-                if (px != null) return px;
-                if (ToDecode == null) return null;
+                var copy = new SPR2Frame(Parent) { Width = Width, Height = Height, Flags = Flags, PaletteID = PaletteID, Version = Version };
+                copy.UpdatePalette();
+                using (var buf = IoBuffer.FromStream(new MemoryStream(data), ByteOrder.LITTLE_ENDIAN))
+                {
+                    copy.ReadDeferred(Version, buf);
+                }
+                if (copy.PixelData != null) return copy.PixelData;
             }
-            return null;
+            DecodeIfRequired(false);
+            return PixelData;
+        }
+
+        /// <summary>State of the frame for the season_info diagnostic.</summary>
+        public string DescribeState()
+        {
+            return Width + "x" + Height + " flags " + Flags + " encoded " + (ToDecode != null) + " pixels " + (PixelData != null ? PixelData.Length.ToString() : "none");
         }
 
         public void Write(IoWriter io, bool ts1)

@@ -102,6 +102,9 @@ namespace FSO.SimAntics.Seasons
             if (routine == 0) return;
             //queued on the plant's own thread, like any entry point, so it runs with the next tick
             plant.ExecuteGenericEntryPoint(new OBJfFunctionEntry { ActionFunction = routine }, vm.Context, false, plant, new short[4]);
+            //the plant sleeps for hours between its own passes (CONFIRMED: its main loop idles 22000 ticks), and a frame pushed
+            //onto a sleeping thread would wait until it wakes. Wake it now, as the "notify out of idle" primitive does.
+            vm.Scheduler.RescheduleInterrupt(plant);
         }
 
         /// <summary>Summary for the season_info diagnostic: how many outdoor plants there are, by state.</summary>

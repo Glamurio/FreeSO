@@ -18,6 +18,7 @@ namespace FSO.LotView.Utils
 
         /// <summary>Counters for the season_info diagnostic: sprites recoloured, and the reasons others fell back to the original.</summary>
         public static int Built, NoFrame, NoPixels, Requests;
+        public static string LastFailure = "";
 
         public static WorldTexture? Get(GraphicsDevice device, DGRPSprite sprite, FoliageLook look)
         {
@@ -34,7 +35,7 @@ namespace FSO.LotView.Utils
             if (tex == null || tex.IsDisposed)
             {
                 var src = frame.GetPixelsForRecolor();
-                if (src == null || frame.Width <= 0 || frame.Height <= 0 || src.Length < frame.Width * frame.Height) { NoPixels++; return null; }
+                if (src == null || frame.Width <= 0 || frame.Height <= 0 || src.Length < frame.Width * frame.Height) { NoPixels++; LastFailure = frame.DescribeState() + (src == null ? ", nothing decoded" : ", decoded " + src.Length); return null; }
                 var w = frame.Width;
                 var h = frame.Height;
                 var px = new Color[w * h];
