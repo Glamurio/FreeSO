@@ -201,6 +201,8 @@ namespace FSO.LotView.Components
                 this.DrawGroup = obj.Resource.Get<DGRP>(gid);
             }
             dgrp = new DGRPRenderer(this.DrawGroup, obj.OBJ);
+            if (this.DrawGroup != null && SeasonalFoliage.HasRealWinter(obj.OBJ.GUID))
+                dgrp.WinterGroup = obj.Resource.Get<DGRP>((ushort)(obj.OBJ.BaseGraphicID + 1));
             dgrp.DynamicSpriteBaseID = obj.OBJ.DynamicSpriteBaseId;
             dgrp.NumDynamicSprites = obj.OBJ.NumDynamicSprites;
             InterpolationOwner = this;

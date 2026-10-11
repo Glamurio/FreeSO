@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace FSO.LotView.Utils
 {
@@ -125,6 +126,28 @@ namespace FSO.LotView.Utils
             return false;
         }
 
+        /// <summary>
+        /// Evergreens that have no winter sprites of their own can be given generated snow (Frost). Off: the generated snow
+        /// did not look good next to the game's own snowy trees, so those evergreens stay as they are in winter.
+        /// </summary>
+        public static bool CraftedFrost = false;
+
+        /// <summary>
+        /// Objects whose graphic has a snowy twin in the game's own files (CONFIRMED by DGRP names and pixels): the large
+        /// Fir, Pine and Spruce of EP4 Trees4.iff (one OBJD per tile) and the Snowy Tumbleweed and Snowy Cypress of EP4
+        /// Shrubs3.iff. The twin is always the next DGRP id (base graphic + 1) of the same file. The small Fir/Pine/Spruce
+        /// of EP3 TreesHD.iff have "snow" DGRPs too, but those point at sprites that are not in the file, so they are not listed.
+        /// </summary>
+        private static readonly HashSet<uint> RealWinter = new HashSet<uint>
+        {
+            0x3026C759, 0x3026EA3C, 0x3026E8FE, 0x3026B863, //Western Slope Fir: rear, right, front, left
+            0x3007ED15, 0x3007C49E, 0x30078DCF, 0x3007A790, //Scenic Pine
+            0x23F3DD6C, 0x03CDE481, 0xF140D974, 0xC15387AD, //Goose Spruce
+            0x72BDBB7D, 0xAED3C88A                          //New Tumbleweed, Polymer Cypress Bush
+        };
+
+        public static bool HasRealWinter(uint guid) { return RealWinter.Contains(guid); }
+
         /// <summary>The look of a kind of foliage in a season (0 spring, 1 summer, 2 autumn, 3 winter; anything else is normal).</summary>
         public static FoliageLook LookFor(FoliageKind kind, int season)
         {
@@ -133,7 +156,7 @@ namespace FSO.LotView.Utils
             {
                 case 0: return kind == FoliageKind.Blossom ? FoliageLook.Blossom : (kind == FoliageKind.Deciduous ? FoliageLook.Spring : FoliageLook.Normal);
                 case 2: return kind == FoliageKind.Evergreen ? FoliageLook.Normal : FoliageLook.Autumn;
-                case 3: return kind == FoliageKind.Evergreen ? FoliageLook.Frosted : FoliageLook.Bare;
+                case 3: return kind == FoliageKind.Evergreen ? (CraftedFrost ? FoliageLook.Frosted : FoliageLook.Normal) : FoliageLook.Bare;
                 default: return FoliageLook.Normal;
             }
         }

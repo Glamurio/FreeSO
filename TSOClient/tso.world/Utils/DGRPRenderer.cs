@@ -48,6 +48,8 @@ namespace FSO.LotView.Utils
         private FoliageLeaf FoliageLeafType;
         private bool FoliageFruit;
         private bool FoliageIsTree;
+        /// <summary>The game's own snowy version of this graphic, shown in winter instead of the normal one (null if it has none).</summary>
+        public DGRP WinterGroup;
 
         public DGRPRenderer(DGRP group, OBJD source)
         {
@@ -60,11 +62,17 @@ namespace FSO.LotView.Utils
             if (Foliage != FoliageKind.None) group?.KeepSpritesEncoded();
         }
 
+        private FoliageLook CurrentLook(WorldState world)
+        {
+            if (WinterGroup != null) return world.FoliageSeason == 3 ? FoliageLook.Frosted : FoliageLook.Normal;
+            return Foliage == FoliageKind.None ? FoliageLook.Normal : SeasonalFoliage.LookFor(Foliage, world.FoliageSeason);
+        }
+
         /// <summary>Makes the next ValidateSprite rebuild the sprites if the world's season changed their look.</summary>
         public void InvalidateSeason(WorldState world)
         {
-            if (Foliage == FoliageKind.None) return;
-            if (SeasonalFoliage.LookFor(Foliage, world.FoliageSeason) != AppliedLook)
+            if (Foliage == FoliageKind.None && WinterGroup == null) return;
+            if (CurrentLook(world) != AppliedLook)
             {
                 _TextureDirty = true;
                 _Dirty = ComponentRenderMode.Both;
@@ -246,7 +254,7 @@ namespace FSO.LotView.Utils
             if (DrawGroup == null) return;
             if (_Dirty.IsSet(ComponentRenderMode._2D))
             {
-                var look = Foliage == FoliageKind.None ? FoliageLook.Normal : SeasonalFoliage.LookFor(Foliage, world.FoliageSeason);
+                var look = CurrentLook(world);
                 if (look != AppliedLook) _TextureDirty = true;
                 if (_TextureDirty)
                 {
@@ -256,7 +264,8 @@ namespace FSO.LotView.Utils
                     var direction = (uint)_Direction;
 
                     /** Compute the direction **/
-                    var image = DrawGroup.GetImage(direction, (uint)world.Zoom, (uint)world.Rotation);
+                    var drawGroup = (WinterGroup != null && look == FoliageLook.Frosted) ? WinterGroup : DrawGroup;
+                    var image = drawGroup.GetImage(direction, (uint)world.Zoom, (uint)world.Rotation);
                     int maxX = int.MinValue, maxY = int.MinValue;
                     int minX = int.MaxValue, minY = int.MaxValue;
                     if (image != null)
@@ -264,7 +273,7 @@ namespace FSO.LotView.Utils
                         foreach (var dgrpSprite in image.Sprites)
                         {
                             if (dgrpSprite == null) continue;
-                            var texture = (look != FoliageLook.Normal ? SeasonalSprites.Get(world.Device, dgrpSprite, look, FoliageLeafType, FoliageFruit) : null)
+                            var texture = (look != FoliageLook.Normal && WinterGroup == null ? SeasonalSprites.Get(world.Device, dgrpSprite, look, FoliageLeafType, FoliageFruit) : null)
                                 ?? world._2D.GetWorldTexture(dgrpSprite);
                             if (texture.Pixel == null) { continue; }
 
