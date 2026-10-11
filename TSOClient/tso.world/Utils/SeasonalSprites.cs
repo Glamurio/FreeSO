@@ -1,3 +1,4 @@
+using System;
 using FSO.Common.Rendering;
 using FSO.Files.Formats.IFF.Chunks;
 using FSO.Files.Utils;
@@ -69,6 +70,46 @@ namespace FSO.LotView.Utils
                 tex.Tag = new TextureInfo(tex, w, h);
                 textures[(int)look] = tex;
                 Built++;
+            }
+            return new WorldTexture { Pixel = tex, ZBuffer = original.ZBuffer };
+        }
+
+        private static readonly ConditionalWeakTable<DGRPSprite, Texture2D[]> LitterCache = new ConditionalWeakTable<DGRPSprite, Texture2D[]>();
+
+        /// <summary>How many rows at the bottom of a Depressed Deciduous tile sprite hold its fallen leaves (zoom 3 art).</summary>
+        private const int LitterRows = 18;
+
+        /// <summary>
+        /// The fallen leaves of a sprite that has them baked in at its foot: only the warm-coloured pixels of its bottom rows, on a
+        /// transparent copy of the same size, with the original z-buffer. Null if the sprite cannot be decoded.
+        /// </summary>
+        public static WorldTexture? GetLitter(GraphicsDevice device, DGRPSprite sprite)
+        {
+            var frame = sprite.GetFrame();
+            if (frame == null) return null;
+            var original = frame.GetWorldTexture(device);
+            if (original.Pixel == null) return null;
+
+            var holder = LitterCache.GetValue(sprite, s => new Texture2D[1]);
+            var tex = holder[0];
+            if (tex == null || tex.IsDisposed)
+            {
+                var src = frame.GetPixelsForRecolor();
+                int w = frame.Width, h = frame.Height;
+                if (src == null || w <= 0 || h <= 0 || src.Length < w * h) return null;
+                var px = new Color[w * h];
+                for (int y = Math.Max(0, h - LitterRows); y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        var c = src[y * w + x];
+                        if (c.A > 0 && SeasonalFoliage.IsFallenLeaf(c.R, c.G, c.B)) px[y * w + x] = c;
+                    }
+                }
+                tex = new Texture2D(device, w, h, false, SurfaceFormat.Color);
+                tex.SetData(px);
+                tex.Tag = new TextureInfo(tex, w, h);
+                holder[0] = tex;
             }
             return new WorldTexture { Pixel = tex, ZBuffer = original.ZBuffer };
         }

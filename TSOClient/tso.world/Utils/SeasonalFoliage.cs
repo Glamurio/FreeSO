@@ -102,6 +102,21 @@ namespace FSO.LotView.Utils
             return FoliageLeaf.Green;
         }
 
+        /// <summary>A real tree (not a shrub, and not the tree-shaped lamp): the ones that drop leaves on the ground in autumn.</summary>
+        public static bool IsTree(string label)
+        {
+            if (string.IsNullOrEmpty(label)) return false;
+            var l = label.ToLowerInvariant();
+            return (l.StartsWith("trees - ") || l.StartsWith("tree - ")) && Classify(label) != FoliageKind.None;
+        }
+
+        /// <summary>Fallen-leaf colours: saturated and warm (orange, yellow, red).</summary>
+        public static bool IsFallenLeaf(byte r, byte g, byte b)
+        {
+            RgbToHsv(r, g, b, out float h, out float s, out float v);
+            return s > 0.45f && (h < 65f || h > 340f) && v > 0.25f;
+        }
+
         public static bool HasFruit(string label)
         {
             if (string.IsNullOrEmpty(label)) return false;

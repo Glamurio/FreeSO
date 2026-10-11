@@ -46,6 +46,7 @@ namespace FSO.LotView.Utils
         private FoliageLook AppliedLook;
         private FoliageLeaf FoliageLeafType;
         private bool FoliageFruit;
+        private bool FoliageIsTree;
 
         public DGRPRenderer(DGRP group, OBJD source)
         {
@@ -54,6 +55,7 @@ namespace FSO.LotView.Utils
             Foliage = SeasonalFoliage.Classify(source?.ChunkLabel, source?.GUID ?? 0);
             FoliageLeafType = SeasonalFoliage.LeafOf(source?.ChunkLabel);
             FoliageFruit = SeasonalFoliage.HasFruit(source?.ChunkLabel);
+            FoliageIsTree = SeasonalFoliage.IsTree(source?.ChunkLabel);
             if (Foliage != FoliageKind.None) group?.KeepSpritesEncoded();
         }
 
@@ -168,6 +170,76 @@ namespace FSO.LotView.Utils
             return Mesh?.Bounds;
         }
 
+        /// <summary>Turns one DGRP sprite and its textures into a drawable item and grows the bounds to include it.</summary>
+        private void AddItem(WorldState world, DGRPSprite dgrpSprite, WorldTexture texture, bool extraFlip, ref int minX, ref int minY, ref int maxX, ref int maxY)
+        {
+            var sprite = new _2DStandaloneSprite(); //do not use sprite pool for DGRP, since we can reliably remember our own sprites.
+            sprite.Pixel = texture.Pixel;
+            sprite.Depth = texture.ZBuffer;
+            if (texture.ZBuffer != null)
+            {
+                sprite.RenderMode = _2DBatchRenderMode.Z_BUFFER;
+                sprite.WorldPosition = dgrpSprite.ObjectOffset;
+            }
+            else
+            {
+                sprite.RenderMode = _2DBatchRenderMode.NO_DEPTH;
+            }
+
+            var pt = ((TextureInfo)sprite.Pixel.Tag).Size;
+            sprite.SrcRect = new Rectangle(0, 0, pt.X, pt.Y);
+            sprite.DestRect = new Rectangle(0, 0, pt.X, pt.Y);
+            sprite.FlipHorizontally = dgrpSprite.Flip != extraFlip;
+            sprite.ObjectID = ObjectID;
+
+            Items.Add(new DGRPRendererItem { Sprite = sprite, DGRPSprite = dgrpSprite });
+
+            var pxX = (world.WorldSpace.CadgeWidth / 2.0f) + dgrpSprite.SpriteOffset.X;
+            var pxY = (world.WorldSpace.CadgeBaseLine - sprite.DestRect.Height) + dgrpSprite.SpriteOffset.Y;
+
+            if (dgrpSprite.ObjectOffset != Vector3.Zero) { }
+            var centerRelative = dgrpSprite.ObjectOffset * new Vector3(1f / 16f, 1f / 16f, 1f / 5f);
+            centerRelative = Vector3.Transform(centerRelative, Matrix.CreateRotationZ(RadianDirection));
+
+            var pxOff = world.WorldSpace.GetScreenFromTile(centerRelative);
+
+            sprite.DestRect.X = (int)(pxX + pxOff.X);
+            sprite.DestRect.Y = (int)(pxY + pxOff.Y);
+
+            if (sprite.DestRect.X < minX) minX = sprite.DestRect.X;
+            if (sprite.DestRect.Y < minY) minY = sprite.DestRect.Y;
+            if (sprite.DestRect.X + sprite.Pixel.Width > maxX) maxX = sprite.DestRect.X + sprite.Pixel.Width;
+            if (sprite.DestRect.Y + sprite.Pixel.Height > maxY) maxY = sprite.DestRect.Y + sprite.Pixel.Height;
+
+            sprite.WorldPosition = centerRelative * 3f;
+            var y = sprite.WorldPosition.Z;
+            sprite.WorldPosition.Z = sprite.WorldPosition.Y;
+            sprite.WorldPosition.Y = y;
+            sprite.Room = ((dgrpSprite.Flags & DGRPSpriteFlags.Luminous) > 0 && Room != 65534 && Room != 65533) ? (ushort)65535 : Room;
+            sprite.Floor = Level;
+        }
+
+        /// <summary>
+        /// Autumn: scatters fallen leaves around the foot of a tree, using the leaf litter that the Spellbound "Depressed Deciduous"
+        /// carries in its own sprites (see LeafLitter). Skipped silently when that pack is not installed. Mirrored on some
+        /// trees so they do not all look the same.
+        /// </summary>
+        private void AddLeafLitter(WorldState world, uint direction, ref int minX, ref int minY, ref int maxX, ref int maxY)
+        {
+            var reference = LeafLitter.ReferenceFor(Source);
+            if (reference == null) return;
+            var image = reference.GetImage(direction, (uint)world.Zoom, (uint)world.Rotation);
+            if (image == null) return;
+            bool mirror = (((int)ObjectID * 31) ^ ((int)ObjectID >> 2)) % 3 == 0;
+            foreach (var dgrpSprite in image.Sprites)
+            {
+                if (dgrpSprite == null) continue;
+                var texture = SeasonalSprites.GetLitter(world.Device, dgrpSprite);
+                if (texture == null || texture.Value.Pixel == null) continue;
+                AddItem(world, dgrpSprite, texture.Value, mirror, ref minX, ref minY, ref maxX, ref maxY);
+            }
+        }
+
         public virtual void ValidateSprite(WorldState world)
         {
             if (DrawGroup == null) return;
@@ -207,51 +279,14 @@ namespace FSO.LotView.Utils
                                     continue;
                                 }
                             }
-                            var sprite = new _2DStandaloneSprite(); //do not use sprite pool for DGRP, since we can reliably remember our own sprites.
-                            sprite.Pixel = texture.Pixel;
-                            sprite.Depth = texture.ZBuffer;
-                            if (texture.ZBuffer != null)
-                            {
-                                sprite.RenderMode = _2DBatchRenderMode.Z_BUFFER;
-                                sprite.WorldPosition = dgrpSprite.ObjectOffset;
-                            }
-                            else
-                            {
-                                sprite.RenderMode = _2DBatchRenderMode.NO_DEPTH;
-                            }
-
-                            var pt = ((TextureInfo)sprite.Pixel.Tag).Size;
-                            sprite.SrcRect = new Rectangle(0, 0, pt.X, pt.Y);
-                            sprite.DestRect = new Rectangle(0, 0, pt.X, pt.Y);
-                            sprite.FlipHorizontally = dgrpSprite.Flip;
-                            sprite.ObjectID = ObjectID;
-
-                            Items.Add(new DGRPRendererItem { Sprite = sprite, DGRPSprite = dgrpSprite });
-
-                            var pxX = (world.WorldSpace.CadgeWidth / 2.0f) + dgrpSprite.SpriteOffset.X;
-                            var pxY = (world.WorldSpace.CadgeBaseLine - sprite.DestRect.Height) + dgrpSprite.SpriteOffset.Y;
-
-                            if (dgrpSprite.ObjectOffset != Vector3.Zero) { }
-                            var centerRelative = dgrpSprite.ObjectOffset * new Vector3(1f / 16f, 1f / 16f, 1f / 5f);
-                            centerRelative = Vector3.Transform(centerRelative, Matrix.CreateRotationZ(RadianDirection));
-
-                            var pxOff = world.WorldSpace.GetScreenFromTile(centerRelative);
-
-                            sprite.DestRect.X = (int)(pxX + pxOff.X);
-                            sprite.DestRect.Y = (int)(pxY + pxOff.Y);
-
-                            if (sprite.DestRect.X < minX) minX = sprite.DestRect.X;
-                            if (sprite.DestRect.Y < minY) minY = sprite.DestRect.Y;
-                            if (sprite.DestRect.X + sprite.Pixel.Width > maxX) maxX = sprite.DestRect.X + sprite.Pixel.Width;
-                            if (sprite.DestRect.Y + sprite.Pixel.Height > maxY) maxY = sprite.DestRect.Y + sprite.Pixel.Height;
-
-                            sprite.WorldPosition = centerRelative * 3f;
-                            var y = sprite.WorldPosition.Z;
-                            sprite.WorldPosition.Z = sprite.WorldPosition.Y;
-                            sprite.WorldPosition.Y = y;
-                            sprite.Room = ((dgrpSprite.Flags & DGRPSpriteFlags.Luminous) > 0 && Room != 65534 && Room != 65533) ? (ushort)65535 : Room;
-                            sprite.Floor = Level;
+                            AddItem(world, dgrpSprite, texture, false, ref minX, ref minY, ref maxX, ref maxY);
                         }
+                    }
+
+                    if (look == FoliageLook.Autumn && FoliageIsTree)
+                    {
+                        try { AddLeafLitter(world, direction, ref minX, ref minY, ref maxX, ref maxY); }
+                        catch (Exception) { /* decoration only: never let it stop the tree from drawing */ }
                     }
 
                     _TextureDirty = false;
